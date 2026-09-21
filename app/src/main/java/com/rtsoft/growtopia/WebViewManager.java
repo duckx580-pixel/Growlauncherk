@@ -24,9 +24,10 @@ import java.util.concurrent.Executors;
 public class WebViewManager {
     public static String originalURL = "";
 
-    // URL the engine last passed to LoadURLPost — the checktoken/login URL Chrome opens for OAuth.
-    // Cached before any ltoken short-circuit so ZennKuyBridge.startResolving() can open it.
-    public static volatile String sLastLoginUrl = "";
+    // URL and binary payload the engine last passed to LoadURLPost.
+    // Cached before any ltoken short-circuit so ZennKuyBridge.startResolving() can replay them.
+    public static volatile String sLastLoginUrl  = "";
+    public static volatile byte[] sLastPostData  = null;
 
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
@@ -108,11 +109,12 @@ public class WebViewManager {
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
-            // Cache URL before ltoken check so ZennKuyBridge can open it in Chrome.
+            // Cache URL and bytes before ltoken check so ZennKuyBridge can replay the POST.
             if (url != null && !url.isEmpty()) {
                 sLastLoginUrl = url;
             }
             if (postData != null && postData.length > 0) {
+                sLastPostData = postData;
                 this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             }
             LoginSpoof spoof = getActiveSpoof();
@@ -125,6 +127,21 @@ public class WebViewManager {
             }
             ShowWebView();
             this.webView.postUrl(url, postData);
+        }));
+    }
+
+    /** Replays the engine's last login POST in the WebView so the login page loads,
+     *  then JS injection routes "Continue with Google" to Chrome. */
+    public void postOAuthDashboard(final String url, final byte[] postData) {
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            this.allowExternalLinks = true;
+            originalURL = url;
+            ShowWebView();
+            if (postData != null && postData.length > 0) {
+                this.webView.postUrl(url, postData);
+            } else {
+                this.webView.loadUrl(url);
+            }
         }));
     }
 
@@ -281,6 +298,16 @@ public class WebViewManager {
 
         @Override
         public void onPageFinished(WebView view, String url) {
+            // Intercept _blank anchor clicks (e.g. "Continue with Google") and route to Chrome.
+            view.loadUrl("javascript:(function f(){" +
+                "var el=document.getElementsByTagName('a');" +
+                "for(var i=0;i<el.length;i++){" +
+                "el[i].addEventListener('click',function(e){" +
+                "if(e.currentTarget.target==='_blank'){" +
+                "e.preventDefault();" +
+                "NativeApp.openInBrowser(e.currentTarget.href);" +
+                "return false;}});}" +
+                "})()");
             this.listener.OnPageLoaded(url);
         }
 

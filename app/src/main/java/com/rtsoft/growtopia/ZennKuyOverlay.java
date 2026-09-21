@@ -84,7 +84,7 @@ public class ZennKuyOverlay {
     }
 
     private void showMenu() {
-        LoginSpoof spoof = new LoginSpoof(ctx);
+        DeviceSpoofer ds = new DeviceSpoofer(ctx);
 
         LinearLayout card = new LinearLayout(ctx);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -123,9 +123,13 @@ public class ZennKuyOverlay {
 
         root.addView(sectionLabel("MAC ADDRESS"));
         LinearLayout macRow = row();
-        EditText macEdit = field(spoof.getMac());
+        EditText macEdit = field(ds.getMac());
         Button macRand = smallBtn("RANDOM");
-        macRand.setOnClickListener(v -> macEdit.setText(spoof.generateMac()));
+        macRand.setOnClickListener(v -> {
+            String m = DeviceSpoofer.generateMac();
+            ds.setMac(m);
+            macEdit.setText(m);
+        });
         macRow.addView(macEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         macRow.addView(macRand);
@@ -134,20 +138,28 @@ public class ZennKuyOverlay {
 
         root.addView(sectionLabel("RID"));
         LinearLayout ridRow = row();
-        EditText ridEdit = field(spoof.getRid());
+        EditText ridEdit = field(ds.getRid());
         Button ridRand = smallBtn("RANDOM");
-        ridRand.setOnClickListener(v -> ridEdit.setText(spoof.generateRid()));
+        ridRand.setOnClickListener(v -> {
+            String r = DeviceSpoofer.generateRid();
+            ds.setRid(r);
+            ridEdit.setText(r);
+        });
         ridRow.addView(ridEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ridRow.addView(ridRand);
         root.addView(ridRow);
         root.addView(spacer(10));
 
-        root.addView(sectionLabel("WK"));
+        root.addView(sectionLabel("GID (WK)"));
         LinearLayout wkRow = row();
-        EditText wkEdit = field(spoof.getWk());
+        EditText wkEdit = field(ds.getGid());
         Button wkRand = smallBtn("RANDOM");
-        wkRand.setOnClickListener(v -> wkEdit.setText(spoof.generateWk()));
+        wkRand.setOnClickListener(v -> {
+            String g = DeviceSpoofer.generateGid();
+            ds.setGid(g);
+            wkEdit.setText(g);
+        });
         wkRow.addView(wkEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         wkRow.addView(wkRand);
@@ -220,10 +232,10 @@ public class ZennKuyOverlay {
         resolveBtn.setOnClickListener(v -> {
             String mac = macEdit.getText().toString().trim();
             String rid = ridEdit.getText().toString().trim();
-            String wk  = wkEdit.getText().toString().trim();
-            if (!mac.isEmpty()) spoof.setMac(mac);
-            if (!rid.isEmpty()) spoof.setRid(rid);
-            if (!wk.isEmpty())  spoof.setWk(wk);
+            String gid = wkEdit.getText().toString().trim();
+            if (!mac.isEmpty()) ds.setMac(mac);
+            if (!rid.isEmpty()) ds.setRid(rid);
+            if (!gid.isEmpty()) ds.setGid(gid);
 
             dialog.dismiss();
             startResolving();

@@ -1,8 +1,6 @@
 package com.rtsoft.growtopia;
 
 import android.app.Activity;
-import android.content.Intent;
-import android.net.Uri;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -12,15 +10,19 @@ public final class ZennKuyBridge {
 
     public static volatile boolean sTokenDelivered = false;
 
-    private static LoginSpoof spoof() {
+    private static DeviceSpoofer deviceSpoofer() {
         if (Main.mainApp == null) return null;
-        return new LoginSpoof(Main.mainApp);
+        return new DeviceSpoofer(Main.mainApp);
     }
 
     public static String generateMac() {
         try {
-            LoginSpoof s = spoof();
-            return s != null ? s.generateMac() : "02:00:00:00:00:00";
+            DeviceSpoofer ds = deviceSpoofer();
+            if (ds != null) {
+                String mac = ds.getMac();
+                if (mac != null && !mac.isEmpty()) return mac;
+            }
+            return DeviceSpoofer.generateMac();
         } catch (Exception e) {
             return "02:00:00:00:00:00";
         }
@@ -28,8 +30,12 @@ public final class ZennKuyBridge {
 
     public static String generateRid() {
         try {
-            LoginSpoof s = spoof();
-            return s != null ? s.generateRid() : "";
+            DeviceSpoofer ds = deviceSpoofer();
+            if (ds != null) {
+                String rid = ds.getRid();
+                if (rid != null && !rid.isEmpty()) return rid;
+            }
+            return DeviceSpoofer.generateRid();
         } catch (Exception e) {
             return "";
         }
@@ -37,8 +43,12 @@ public final class ZennKuyBridge {
 
     public static String generateWk() {
         try {
-            LoginSpoof s = spoof();
-            return s != null ? s.generateWk() : "";
+            DeviceSpoofer ds = deviceSpoofer();
+            if (ds != null) {
+                String gid = ds.getGid();
+                if (gid != null && !gid.isEmpty()) return gid;
+            }
+            return DeviceSpoofer.generateGid();
         } catch (Exception e) {
             return "";
         }
@@ -79,16 +89,21 @@ public final class ZennKuyBridge {
         }
 
         final String finalUrl = loginUrl;
+        final byte[] postData = WebViewManager.sLastPostData;
         act.runOnUiThread(() -> {
             try {
-                new LoginSpoof(act).setGoogleLogs("Opening in Chrome: " + finalUrl);
-                Log.d(TAG, "startResolving: opening in Chrome → " + finalUrl);
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                act.startActivity(intent);
+                new LoginSpoof(act).setGoogleLogs("Posting login via WebView: " + finalUrl);
+                Log.d(TAG, "startResolving: posting to WebView → " + finalUrl);
+                WebViewManager wvm = Main.GetWebViewManager();
+                if (wvm != null) {
+                    wvm.postOAuthDashboard(finalUrl, postData);
+                } else {
+                    Log.e(TAG, "startResolving: WebViewManager is null");
+                    Toast.makeText(act, "Could not open login WebView.", Toast.LENGTH_LONG).show();
+                }
             } catch (Exception e) {
                 Log.e(TAG, "startResolving: " + e.getMessage());
-                Toast.makeText(act, "Could not open browser: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                Toast.makeText(act, "Could not start login: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
     }
