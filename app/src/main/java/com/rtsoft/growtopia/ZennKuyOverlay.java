@@ -154,14 +154,24 @@ public class ZennKuyOverlay {
         root.addView(wkRow);
         root.addView(spacer(14));
 
-        TextView hint = label("Tap Start Resolving → Chrome opens Growtopia login\n→ sign in with Google → game logs in automatically.");
-        hint.setTextColor(C_ACCENT);
+        root.addView(sectionLabel("LOGIN URL TARGET"));
+        String cachedUrl = WebViewManager.sLastLoginUrl;
+        TextView urlTarget = label(cachedUrl != null && !cachedUrl.isEmpty()
+                ? cachedUrl : "(tap Play Online in-game first)");
+        urlTarget.setTextColor(cachedUrl != null && !cachedUrl.isEmpty() ? C_ACCENT : C_MUTED);
+        urlTarget.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        urlTarget.setTypeface(android.graphics.Typeface.MONOSPACE);
+        root.addView(urlTarget);
+        root.addView(spacer(14));
+
+        TextView hint = label("Tap Play Online in the game → tap LOGIN TOKEN → pick\nyour Google account in Chrome → game logs in.");
+        hint.setTextColor(C_MUTED);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         root.addView(hint);
         root.addView(spacer(14));
 
         Button resolveBtn = new Button(ctx);
-        resolveBtn.setText("START RESOLVING");
+        resolveBtn.setText("LOGIN TOKEN");
         resolveBtn.setTextColor(Color.WHITE);
         resolveBtn.setTypeface(null, Typeface.BOLD);
         resolveBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -251,22 +261,6 @@ public class ZennKuyOverlay {
         b.show();
     }
 
-    /**
-     * Initiates Google login via the WebView → Chrome → grow:// redirect flow.
-     *
-     * <p>Delegates entirely to {@link ZennKuyBridge#startResolving()} which handles:
-     * <ol>
-     *   <li>Short-circuit if token already delivered this session ({@code sTokenDelivered})</li>
-     *   <li>Inject saved ltoken / refresh-token spoof if enabled</li>
-     *   <li>Skip if WebView OAuth flow is already running</li>
-     *   <li>Fallback: load Growtopia dashboard URL in WebView</li>
-     * </ol>
-     *
-     * <p><b>Do NOT call {@code googleSignInHelper.SignIn()} here.</b> That launches
-     * the native Google SDK account picker which fails with Error 10 (DEVELOPER_ERROR)
-     * on debug-signed APKs because the debug keystore SHA-1 is not registered in
-     * Firebase — and V3 cannot register it without breaking the stock build.
-     */
     private void startResolving() {
         ZennKuyBridge.startResolving();
     }

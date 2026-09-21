@@ -1,6 +1,8 @@
 package com.rtsoft.growtopia;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -43,18 +45,15 @@ public final class ZennKuyBridge {
     }
 
     /**
-     * Replays the engine's last LoadURLPost call against Ubisoft's dashboard so that
-     * Ubisoft mints a session and returns a Google OAuth URL containing a valid state=
-     * parameter.  The WebViewManager intercepts the accounts.google.com redirect and
-     * opens it in Chrome; Chrome redirects to grow://?token=<LTOKEN> which
-     * Main.onNewIntent picks up and injects into the engine.
+     * Opens the engine's login URL directly in Chrome so Ubisoft's OAuth page loads
+     * in a real browser — no in-app WebView, no window.open() popup issues.
      *
-     * The raw bytes cached in WebViewManager.sLastPostData are passed directly to
-     * webView.postUrl — they are never re-encoded so the engine's binary hash fields
-     * are preserved exactly.
-     *
-     * If the engine hasn't posted to the dashboard yet (sLastPostData == null), the
-     * user is told to tap Login / Play Online in the game first.
+     * Flow:
+     *  1. Engine calls LoadURLPost(url, data) → url cached in WebViewManager.sLastLoginUrl
+     *  2. User taps LOGIN TOKEN → this method fires
+     *  3. Chrome opens the URL; user picks Google account
+     *  4. Google redirects to grow://?token=<LTOKEN>
+     *  5. Main.onNewIntent extracts token → nativeOnScriptCall("nativeSignIn", token)
      */
     public static void startResolving() {
         sTokenDelivered = false;
@@ -64,40 +63,32 @@ public final class ZennKuyBridge {
             return;
         }
 
-        byte[] postData = WebViewManager.sLastPostData;
-        String dashboardUrl = WebViewManager.sLastDashboardUrl;
-
-        if (postData == null || postData.length == 0) {
+        String loginUrl = WebViewManager.sLastLoginUrl;
+        if (loginUrl == null || loginUrl.isEmpty()) {
             act.runOnUiThread(() -> {
-                String msg = "No engine payload captured yet.\n"
-                        + "Please tap LOGIN / PLAY ONLINE in the game first,\n"
-                        + "then tap START RESOLVING again.";
-                Toast.makeText(act, msg, Toast.LENGTH_LONG).show();
-                try {
-                    new LoginSpoof(act).setGoogleLogs(
-                            "sLastPostData is null — tap Login in-game first.");
-                } catch (Exception ignored) {}
+                Toast.makeText(act,
+                        "No login URL captured yet.\n"
+                        + "Please tap PLAY ONLINE in the game first,\n"
+                        + "then tap LOGIN TOKEN again.",
+                        Toast.LENGTH_LONG).show();
+                try { new LoginSpoof(act).setGoogleLogs("sLastLoginUrl is null — tap Play Online first."); }
+                catch (Exception ignored) {}
             });
-            Log.w(TAG, "startResolving: sLastPostData not yet captured; aborting");
+            Log.w(TAG, "startResolving: sLastLoginUrl not captured yet; aborting");
             return;
         }
 
-        if (dashboardUrl == null || dashboardUrl.isEmpty()) {
-            dashboardUrl = "https://login.growtopiagame.com/player/login/dashboard";
-        }
-
-        final String finalUrl = dashboardUrl;
-        final byte[] finalData = postData;
+        final String finalUrl = loginUrl;
         act.runOnUiThread(() -> {
             try {
-                new LoginSpoof(act).setGoogleLogs(
-                        "Replaying engine POST to dashboard ("
-                        + finalData.length + " bytes) — waiting for Google OAuth redirect …");
-                Log.d(TAG, "startResolving: POST to " + finalUrl
-                        + " (" + finalData.length + " bytes)");
-                Main.mainApp.webViewManager.postOAuthDashboard(finalUrl, finalData);
+                new LoginSpoof(act).setGoogleLogs("Opening in Chrome: " + finalUrl);
+                Log.d(TAG, "startResolving: opening in Chrome → " + finalUrl);
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                act.startActivity(intent);
             } catch (Exception e) {
                 Log.e(TAG, "startResolving: " + e.getMessage());
+                Toast.makeText(act, "Could not open browser: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
     }

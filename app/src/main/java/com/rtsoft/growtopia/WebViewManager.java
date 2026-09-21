@@ -9,9 +9,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
 import android.view.ViewGroup;
-import android.os.Message;
 import android.webkit.JavascriptInterface;
-import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -26,10 +24,9 @@ import java.util.concurrent.Executors;
 public class WebViewManager {
     public static String originalURL = "";
 
-    // Static cache of the last dashboard URL + raw POST bytes the engine sent via LoadURLPost.
-    // Populated before any ltoken short-circuit so ZennKuyBridge can replay the exact payload.
-    public static volatile String sLastDashboardUrl = "";
-    public static volatile byte[] sLastPostData = null;
+    // URL the engine last passed to LoadURLPost — the checktoken/login URL Chrome opens for OAuth.
+    // Cached before any ltoken short-circuit so ZennKuyBridge.startResolving() can open it.
+    public static volatile String sLastLoginUrl = "";
 
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
@@ -90,65 +87,6 @@ public class WebViewManager {
             s.setSupportMultipleWindows(true);
             s.setJavaScriptCanOpenWindowsAutomatically(true);
             wv.setBackgroundColor(0);
-            wv.setWebChromeClient(new WebChromeClient() {
-                @Override
-                public boolean onCreateWindow(WebView view, boolean isDialog,
-                                              boolean isUserGesture, Message resultMsg) {
-                    // Ubisoft's "Continue with Google" button fires window.open().
-                    // We can't read the URL synchronously here, so we create a
-                    // temporary WebView whose client immediately intercepts any
-                    // navigation and routes it to Chrome or Main.
-                    WebView popup = new WebView(view.getContext());
-                    popup.setWebViewClient(new WebViewClient() {
-                        @Override
-                        public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                            return shouldOverrideUrlLoading(v,
-                                    req.getUrl() == null ? "" : req.getUrl().toString());
-                        }
-                        @Override @SuppressWarnings("deprecation")
-                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
-                            if (url == null) return false;
-                            Uri uri = Uri.parse(url);
-                            String scheme = uri.getScheme();
-                            if ("grow".equalsIgnoreCase(scheme)) {
-                                try {
-                                    Intent i = new Intent(Intent.ACTION_VIEW, uri);
-                                    i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                                    WebViewManager.this.baseActivity.startActivity(i);
-                                } catch (Exception ex) {
-                                    Log.e("WebViewManager", "popup grow:// failed: " + ex.getMessage());
-                                }
-                                WebViewManager.this.HideWebView();
-                                return true;
-                            }
-                            String host = uri.getHost();
-                            if (host != null && host.contains("accounts.google.com")) {
-                                String state = uri.getQueryParameter("state");
-                                if (state == null || state.isEmpty()) {
-                                    Log.w("WebViewManager", "popup Google URL missing state= — blocked: " + url);
-                                    return true;
-                                }
-                                Toast.makeText(WebViewManager.this.baseActivity,
-                                        "Logging in with google... wait a moment...",
-                                        Toast.LENGTH_LONG).show();
-                                WebViewManager.this.baseActivity.startActivityForResult(
-                                        new Intent(Intent.ACTION_VIEW, uri), 1);
-                                return true;
-                            }
-                            // For any other URL the popup navigates to, open in Chrome.
-                            try {
-                                WebViewManager.this.baseActivity.startActivity(
-                                        new Intent(Intent.ACTION_VIEW, uri));
-                            } catch (Exception ignored) {}
-                            return true;
-                        }
-                    });
-                    WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-                    transport.setWebView(popup);
-                    resultMsg.sendToTarget();
-                    return true;
-                }
-            });
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
             this.baseActivity.addContentView(wv, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
@@ -170,11 +108,11 @@ public class WebViewManager {
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
-            // Cache engine payload statically BEFORE the ltoken check so ZennKuyBridge
-            // can always replay the exact binary bytes the engine sent.
+            // Cache URL before ltoken check so ZennKuyBridge can open it in Chrome.
+            if (url != null && !url.isEmpty()) {
+                sLastLoginUrl = url;
+            }
             if (postData != null && postData.length > 0) {
-                sLastDashboardUrl = url;
-                sLastPostData = postData;
                 this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             }
             LoginSpoof spoof = getActiveSpoof();
@@ -187,22 +125,6 @@ public class WebViewManager {
             }
             ShowWebView();
             this.webView.postUrl(url, postData);
-        }));
-    }
-
-    /**
-     * Replays the engine's last dashboard POST without the saved-token short-circuit.
-     * Uses the raw bytes cached by LoadURLPost so the binary payload is not re-encoded.
-     * Called by ZennKuyBridge.startResolving() so Ubisoft always mints a fresh
-     * session and returns a Google OAuth URL containing the required state= param.
-     */
-    public void postOAuthDashboard(final String url, final byte[] rawPostData) {
-        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
-            this.allowExternalLinks = false;
-            originalURL = url;
-            this.last_url = url;
-            ShowWebView();
-            this.webView.postUrl(url, rawPostData);
         }));
     }
 
