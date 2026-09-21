@@ -204,6 +204,8 @@ public class WebViewManager {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             AppLogger.log("WVM", "postOAuthDashboard: " + url
                     + " bytes=" + (postData == null ? 0 : postData.length));
+            Toast.makeText(this.baseActivity, "Dashboard POST sent — waiting for Google URL…",
+                    Toast.LENGTH_SHORT).show();
             this.allowExternalLinks = true;
             originalURL = url;
             ShowWebView();
@@ -303,7 +305,10 @@ public class WebViewManager {
                     AppLogger.warn("WVM", "openInBrowser: URL null/empty, ignoring");
                     return;
                 }
-                AppLogger.log("WVM", "openInBrowser dispatching to browser: " + url);
+                AppLogger.log("WVM", "openInBrowser → Chrome: " + url);
+                Toast.makeText(WebViewManager.this.baseActivity,
+                        "Launching Chrome for Google login…", Toast.LENGTH_SHORT).show();
+                WebViewManager.this.HideWebView();
                 Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 WebViewManager.this.baseActivity.startActivity(i);
@@ -351,6 +356,9 @@ public class WebViewManager {
                 if (nh != null && (nh.contains("accounts.google.com")
                         || nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin")))) {
                     AppLogger.log("WVM", "override: Google URL → Chrome: " + url);
+                    Toast.makeText(this.baseActivity,
+                            "Launching Chrome for Google login…", Toast.LENGTH_SHORT).show();
+                    WebViewManager.this.HideWebView();
                     Intent i = new Intent(Intent.ACTION_VIEW, next);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     this.baseActivity.startActivity(i);
@@ -379,33 +387,44 @@ public class WebViewManager {
         @Override
         public void onPageFinished(WebView view, String url) {
             AppLogger.log("WVM", "onPageFinished: " + url);
-            // Universal interceptor:
-            // 1. Hook window.open() so popup navigation goes to Chrome.
-            // 2. Global capture-phase click listener traverses the DOM upward to find
-            //    any href or data-url, routing Google-related URLs to Chrome.
-            // 3. Enumerate buttons/anchors whose text contains "Google" as a fallback.
+            // Automatic Google auth handoff — no user tap needed:
+            // Pass 1: scan every <a> for a direct Google OAuth href and call openInBrowser.
+            // Pass 2: find the "Continue with Google" button and auto-click it;
+            //         the resulting navigation is caught by shouldOverrideUrlLoading.
+            // Pass 3: install window.open hook + global capture-phase listener as fallback.
             view.loadUrl("javascript:(function(){"
+                // --- window.open hook ---
                 + "window.open=function(u){if(u){NativeApp.openInBrowser(u);}return null;};"
+                // --- Pass 1: direct href scan ---
+                + "(function(){"
+                +   "var links=document.querySelectorAll('a[href]');"
+                +   "for(var i=0;i<links.length;i++){"
+                +     "var h=links[i].href||'';"
+                +     "if(h.indexOf('accounts.google.com')!==-1||h.indexOf('google.com/o/oauth2')!==-1){"
+                +       "NativeApp.openInBrowser(h);return;"
+                +     "}"
+                +   "}"
+                // --- Pass 2: auto-click the Google button ---
+                +   "var all=document.querySelectorAll('button,a,div[role=\"button\"],span');"
+                +   "for(var j=0;j<all.length;j++){"
+                +     "var txt=(all[j].innerText||all[j].textContent||'').trim();"
+                +     "if(txt==='Continue with Google'||txt==='Google'){"
+                +       "all[j].click();return;"
+                +     "}"
+                +   "}"
+                + "})();"
+                // --- Pass 3: global capture-phase click fallback ---
                 + "document.addEventListener('click',function(e){"
                 +   "var el=e.target;"
                 +   "while(el&&el!==document){"
-                +     "var href=el.href||el.getAttribute('data-url');"
-                +     "if(href&&(href.indexOf('google')!==-1||href.indexOf('accounts.')!==-1)){"
+                +     "var href=el.href||el.getAttribute('data-url')||'';"
+                +     "if(href&&(href.indexOf('accounts.google.com')!==-1||href.indexOf('google.com/o/oauth2')!==-1)){"
                 +       "e.preventDefault();e.stopPropagation();"
                 +       "NativeApp.openInBrowser(href);return;"
                 +     "}"
                 +     "el=el.parentElement;"
                 +   "}"
                 + "},true);"
-                + "var btns=document.querySelectorAll('button,a,div[role=\"button\"]');"
-                + "for(var i=0;i<btns.length;i++){(function(b){"
-                +   "if(b.innerText&&b.innerText.indexOf('Google')!==-1){"
-                +     "b.addEventListener('click',function(e){"
-                +       "var link=b.getAttribute('href')||b.getAttribute('data-url');"
-                +       "if(link){e.preventDefault();NativeApp.openInBrowser(link);}"
-                +     "});"
-                +   "}"
-                + "})(btns[i]);}"
                 + "})()");
             this.listener.OnPageLoaded(url);
         }

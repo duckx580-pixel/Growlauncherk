@@ -115,6 +115,16 @@ public class Main extends SharedActivity {
     }
 
     @Override
+    public void onBackPressed() {
+        if (webViewManager != null && webViewManager.IsVisible()) {
+            AppLogger.log("Main", "Back pressed — dismissing WebView");
+            webViewManager.HideWebView();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
     public void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
@@ -183,6 +193,7 @@ public class Main extends SharedActivity {
             configuration.screenWidthDp = oldHeight;
             getResources().updateConfiguration(configuration, getResources().getDisplayMetrics());
         }
+        AppLogger.initFileLog(this);
         JavaInterface.injectActivityJava(this);
         handleGrowIntent(getIntent());
         this.heightProvider = new HeightProvider(this).setHeightListener(this::OnKeyboardHeightChanged);
