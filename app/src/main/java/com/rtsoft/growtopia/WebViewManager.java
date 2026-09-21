@@ -117,6 +117,22 @@ public class WebViewManager {
         }));
     }
 
+    /**
+     * Posts to the OAuth dashboard without the saved-token short-circuit.
+     * Used by ZennKuyBridge.startResolving() so Ubisoft always mints a fresh
+     * session and returns a Google OAuth URL containing the required state= param.
+     */
+    public void postOAuthDashboard(final String url, final byte[] postData) {
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            this.allowExternalLinks = false;
+            originalURL = url;
+            this.last_url = url;
+            if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            ShowWebView();
+            this.webView.postUrl(url, postData);
+        }));
+    }
+
     private static LoginSpoof getActiveSpoof() {
         try {
             if (Main.mainApp == null) return null;
@@ -225,8 +241,32 @@ public class WebViewManager {
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
             try {
                 Uri next = Uri.parse(url == null ? "" : url);
+                String scheme = next.getScheme();
+
+                // grow:// — Ubisoft's post-OAuth redirect carrying the login token.
+                // Route it as an Intent so Main.onNewIntent can pick up the token.
+                if ("grow".equalsIgnoreCase(scheme)) {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, next);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        this.baseActivity.startActivity(intent);
+                    } catch (Exception ex) {
+                        android.util.Log.e("WebViewManager", "grow:// route failed: " + ex.getMessage());
+                    }
+                    WebViewManager.this.HideWebView();
+                    return true;
+                }
+
                 String nh = next.getHost();
                 if (nh != null && nh.contains("accounts.google.com")) {
+                    // Only open the Google OAuth URL if Ubisoft included state=.
+                    // Without state= the /google/callback endpoint rejects the auth flow.
+                    String stateParam = next.getQueryParameter("state");
+                    if (stateParam == null || stateParam.isEmpty()) {
+                        android.util.Log.w("WebViewManager",
+                                "Google OAuth URL missing state= — not opening: " + url);
+                        return true;
+                    }
                     Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
                     this.baseActivity.startActivityForResult(new Intent(Intent.ACTION_VIEW, next), 1);
                     return true;

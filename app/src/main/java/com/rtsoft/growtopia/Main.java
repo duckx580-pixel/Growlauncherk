@@ -115,6 +115,46 @@ public class Main extends SharedActivity {
     }
 
     @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleGrowIntent(intent);
+    }
+
+    /**
+     * Handles grow:// deep links that Chrome fires after Ubisoft's Google OAuth callback.
+     * Ubisoft redirects to grow://?token=<LTOKEN> (or grow://?info=<LTOKEN>).
+     * We extract the token and pass it to the engine via nativeOnScriptCall so login completes.
+     */
+    private void handleGrowIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        android.net.Uri data = intent.getData();
+        if (data == null || !"grow".equalsIgnoreCase(data.getScheme())) return;
+
+        String token = data.getQueryParameter("token");
+        if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
+        if (token == null || token.isEmpty()) {
+            Log.w("GrowDeepLink", "grow:// intent had no token/info param: " + data);
+            return;
+        }
+
+        final String finalToken = token;
+        Log.d("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
+        LoginSpoof spoof = new LoginSpoof(this);
+        spoof.setLtoken(finalToken);
+        spoof.setEnabled(true);
+        spoof.setGoogleLogs("Token received via grow:// deep link (len=" + finalToken.length() + ")");
+        ZennKuyBridge.sTokenDelivered = true;
+        webViewManager.HideWebView();
+
+        if (googleSignInHelper != null) {
+            googleSignInHelper.deliverResult(0, finalToken);
+        } else {
+            webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
+        }
+    }
+
+    @Override
     public void onConfigurationChanged(Configuration config) {
         int h = config.screenHeightDp, w = config.screenWidthDp;
         if (h > w) { config.screenHeightDp = w; config.screenWidthDp = h; }
@@ -144,6 +184,7 @@ public class Main extends SharedActivity {
             getResources().updateConfiguration(configuration, getResources().getDisplayMetrics());
         }
         JavaInterface.injectActivityJava(this);
+        handleGrowIntent(getIntent());
         this.heightProvider = new HeightProvider(this).setHeightListener(this::OnKeyboardHeightChanged);
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();
