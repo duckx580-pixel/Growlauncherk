@@ -271,9 +271,13 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void openInBrowser(final String url) {
+            Log.d("WebViewManager", "openInBrowser called with URL: " + url);
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                if (url == null) return;
-                Log.d("WebViewManager", "openInBrowser: " + url);
+                if (url == null || url.isEmpty()) {
+                    Log.w("WebViewManager", "openInBrowser: URL is null/empty, ignoring");
+                    return;
+                }
+                Log.d("WebViewManager", "openInBrowser dispatching to system browser: " + url);
                 Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 WebViewManager.this.baseActivity.startActivity(i);
@@ -290,43 +294,42 @@ public class WebViewManager {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-            return shouldOverrideUrlLoading(v, req.getUrl() == null ? "" : req.getUrl().toString());
+            String url = req.getUrl() == null ? "" : req.getUrl().toString();
+            Log.d("WebViewManager", "shouldOverrideUrlLoading (req): " + url);
+            return shouldOverrideUrlLoading(v, url);
         }
 
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
+            Log.d("WebViewManager", "shouldOverrideUrlLoading: " + url);
             try {
                 Uri next = Uri.parse(url == null ? "" : url);
                 String scheme = next.getScheme();
 
                 // grow:// — Ubisoft's post-OAuth redirect carrying the login token.
-                // Route it as an Intent so Main.onNewIntent can pick up the token.
                 if ("grow".equalsIgnoreCase(scheme)) {
                     try {
                         Intent intent = new Intent(Intent.ACTION_VIEW, next);
                         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
                         this.baseActivity.startActivity(intent);
                     } catch (Exception ex) {
-                        android.util.Log.e("WebViewManager", "grow:// route failed: " + ex.getMessage());
+                        Log.e("WebViewManager", "grow:// route failed: " + ex.getMessage());
                     }
                     WebViewManager.this.HideWebView();
                     return true;
                 }
 
                 String nh = next.getHost();
-                if (nh != null && nh.contains("accounts.google.com")) {
-                    // Only open the Google OAuth URL if Ubisoft included state=.
-                    // Without state= the /google/callback endpoint rejects the auth flow.
-                    String stateParam = next.getQueryParameter("state");
-                    if (stateParam == null || stateParam.isEmpty()) {
-                        android.util.Log.w("WebViewManager",
-                                "Google OAuth URL missing state= — not opening: " + url);
-                        return true;
-                    }
-                    Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                    this.baseActivity.startActivityForResult(new Intent(Intent.ACTION_VIEW, next), 1);
+                // Route any Google OAuth / account-selection URL to Chrome.
+                if (nh != null && (nh.contains("accounts.google.com")
+                        || nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin")))) {
+                    Log.d("WebViewManager", "shouldOverrideUrlLoading: routing Google URL to Chrome: " + url);
+                    Intent i = new Intent(Intent.ACTION_VIEW, next);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    this.baseActivity.startActivity(i);
                     return true;
                 }
+
                 Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 String oh = orig.getHost();
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
@@ -336,15 +339,42 @@ public class WebViewManager {
                 this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                 return true;
             } catch (Exception e) {
+                Log.e("WebViewManager", "shouldOverrideUrlLoading error: " + e.getMessage());
                 return false;
             }
         }
 
         @Override
         public void onPageFinished(WebView view, String url) {
-            // Intercept _blank anchor clicks (e.g. "Continue with Google") and route to Chrome.
-            // Exact JS from reference implementation.
-            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {\nvalue.addEventListener(\"click\", function(e) {  if (e.currentTarget.target == '_blank') { e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false; } });}})()");
+            Log.d("WebViewManager", "onPageFinished: " + url);
+            // Universal interceptor:
+            // 1. Hook window.open() so popup navigation goes to Chrome.
+            // 2. Global capture-phase click listener traverses the DOM upward to find
+            //    any href or data-url, routing Google-related URLs to Chrome.
+            // 3. Enumerate buttons/anchors whose text contains "Google" as a fallback.
+            view.loadUrl("javascript:(function(){"
+                + "window.open=function(u){if(u){NativeApp.openInBrowser(u);}return null;};"
+                + "document.addEventListener('click',function(e){"
+                +   "var el=e.target;"
+                +   "while(el&&el!==document){"
+                +     "var href=el.href||el.getAttribute('data-url');"
+                +     "if(href&&(href.indexOf('google')!==-1||href.indexOf('accounts.')!==-1)){"
+                +       "e.preventDefault();e.stopPropagation();"
+                +       "NativeApp.openInBrowser(href);return;"
+                +     "}"
+                +     "el=el.parentElement;"
+                +   "}"
+                + "},true);"
+                + "var btns=document.querySelectorAll('button,a,div[role=\"button\"]');"
+                + "for(var i=0;i<btns.length;i++){(function(b){"
+                +   "if(b.innerText&&b.innerText.indexOf('Google')!==-1){"
+                +     "b.addEventListener('click',function(e){"
+                +       "var link=b.getAttribute('href')||b.getAttribute('data-url');"
+                +       "if(link){e.preventDefault();NativeApp.openInBrowser(link);}"
+                +     "});"
+                +   "}"
+                + "})(btns[i]);}"
+                + "})()");
             this.listener.OnPageLoaded(url);
         }
 
