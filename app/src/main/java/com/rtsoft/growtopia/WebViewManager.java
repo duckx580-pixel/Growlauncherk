@@ -3,19 +3,22 @@ package com.rtsoft.growtopia;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
-import android.widget.Toast;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -82,6 +85,47 @@ public class WebViewManager {
                         @Override public void OnError(int e) { nativeOnErrorOccurred(e); }
                         @Override public void OnPageLoaded(String url) { nativeOnPageLoaded(url); }
                     }));
+            wv.setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                    // Capture the URL that window.open() wants to load (e.g. Google OAuth).
+                    WebView probe = new WebView(view.getContext());
+                    probe.setWebViewClient(new WebViewClient() {
+                        @Override
+                        public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                            return shouldOverrideUrlLoading(v,
+                                    req.getUrl() == null ? "" : req.getUrl().toString());
+                        }
+                        @Override @SuppressWarnings("deprecation")
+                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                            if (url != null && !url.isEmpty()) {
+                                Log.d("WebViewManager", "onCreateWindow captured URL: " + url);
+                                baseActivity.runOnUiThread(() -> {
+                                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    baseActivity.startActivity(i);
+                                });
+                            }
+                            return true;
+                        }
+                        @Override
+                        public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                            if (url != null && !url.isEmpty() && !url.equals("about:blank")) {
+                                Log.d("WebViewManager", "onCreateWindow pageStarted URL: " + url);
+                                baseActivity.runOnUiThread(() -> {
+                                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    baseActivity.startActivity(i);
+                                });
+                            }
+                        }
+                    });
+                    WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                    transport.setWebView(probe);
+                    resultMsg.sendToTarget();
+                    return true;
+                }
+            });
             WebSettings s = wv.getSettings();
             s.setJavaScriptEnabled(true);
             s.setDomStorageEnabled(true);
@@ -229,10 +273,10 @@ public class WebViewManager {
         public void openInBrowser(final String url) {
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
                 if (url == null) return;
-                Toast.makeText(WebViewManager.this.baseActivity,
-                        "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                WebViewManager.this.baseActivity.startActivityForResult(
-                        new Intent(Intent.ACTION_VIEW, Uri.parse(url)), 1);
+                Log.d("WebViewManager", "openInBrowser: " + url);
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                WebViewManager.this.baseActivity.startActivity(i);
             });
         }
     }
@@ -299,15 +343,8 @@ public class WebViewManager {
         @Override
         public void onPageFinished(WebView view, String url) {
             // Intercept _blank anchor clicks (e.g. "Continue with Google") and route to Chrome.
-            view.loadUrl("javascript:(function f(){" +
-                "var el=document.getElementsByTagName('a');" +
-                "for(var i=0;i<el.length;i++){" +
-                "el[i].addEventListener('click',function(e){" +
-                "if(e.currentTarget.target==='_blank'){" +
-                "e.preventDefault();" +
-                "NativeApp.openInBrowser(e.currentTarget.href);" +
-                "return false;}});}" +
-                "})()");
+            // Exact JS from reference implementation.
+            view.loadUrl("javascript:(function f() {var element = document.getElementsByTagName(\"a\");for (const value of element) {\nvalue.addEventListener(\"click\", function(e) {  if (e.currentTarget.target == '_blank') { e.preventDefault(); NativeApp.openInBrowser(e.currentTarget.href); return false; } });}})()");
             this.listener.OnPageLoaded(url);
         }
 
