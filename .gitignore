@@ -1,0 +1,89 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+!app/src/main/jniLibs/**/*.so
+*.dylib
+*.dll
+*.so.*
+
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Build directories
+build/
+Build/
+build-*/
+.gradle/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*.swp
+
+# vcpkg
+vcpkg_installed/
+
+# debug information files
+*.dwo
+
+# test output & cache
+Testing/
+.cache/
+local.properties
+
+# Native build intermediates
+app/.cxx/
+
+# Local references, backups, and build caches (not part of the launcher source)
+_reference_growtopia_557/
+.reference-growtopia/
+emulator-*.png
+_reference_real_launcher_557/
+app/reference-backups/
+app/src/main/assets_v557/
+app/src/main/assets/
+.gradle-user/
+.idea/
+.devin/
+build-v557*.log
+build-v557*.exit

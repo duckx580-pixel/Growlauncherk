@@ -1,0 +1,38 @@
+<resources>
+    <string name="app_name">Growlauncher</string>
+    <string name="brand_name">The Rare Owl</string>
+    <string name="greeting">Hello, %1$s</string>
+    <string name="welcome_text">Welcome to new Growlauncher UI, this growlauncher rebuilt because old growlauncher doesn\'t scalable and the UI is also boring. Hope you guys enjoy new Growlauncher UI :)</string>
+
+    <string name="label_growtopia">Growtopia</string>
+    <string name="label_growlauncher">Growlauncher</string>
+    <string name="label_discord">Discord</string>
+    <string name="label_role">Role</string>
+    <string name="version_value">Version %1$s</string>
+
+    <string name="section_version_changer">Version Changer</string>
+    <string name="section_main_menu">Main Menu</string>
+    <string name="section_announcement">Announcement</string>
+    <string name="version_changer_value">Growtopia Version: %1$s</string>
+    <string name="announcement_text">No announcement right now.</string>
+
+    <string name="menu_launch">Launch</string>
+    <string name="menu_launch_desc">Start growtopia.</string>
+    <string name="menu_script_hub">Script Hub</string>
+    <string name="menu_script_hub_desc">Explore script.</string>
+    <string name="menu_my_script">My Script</string>
+    <string name="menu_my_script_desc">Lua manager.</string>
+    <string name="menu_setting">Setting</string>
+    <string name="menu_setting_desc">Open settings.</string>
+    <string name="menu_theme_picker">Theme Picker</string>
+    <string name="menu_theme_picker_desc">Style growlauncher by your favorite color.</string>
+
+    <string name="coming_soon">%1$s is coming soon.</string>
+    <string name="engine_missing_title">Growtopia engine missing</string>
+    <string name="engine_missing_message">lib%1$s.so is not bundled in this build. Drop the arm64-v8a Growtopia %2$s libraries into app/src/main/jniLibs/arm64-v8a and rebuild.</string>
+
+    <string name="crash_share">Share crash log</string>
+    <string name="crash_log_empty">No crash log recorded yet.</string>
+    <string name="crash_detected_title">Growtopia crashed</string>
+    <string name="crash_detected_message">The last launch ended unexpectedly. A report with the device details and the native crash log was saved as %1$s.</string>
+</resources>
