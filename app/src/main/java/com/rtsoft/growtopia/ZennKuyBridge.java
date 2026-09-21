@@ -2,21 +2,13 @@ package com.rtsoft.growtopia;
 
 import android.app.Activity;
 import android.util.Log;
-
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
+import android.widget.Toast;
 
 public final class ZennKuyBridge {
     private static final String TAG = "ZennKuyBridge";
     private ZennKuyBridge() {}
 
     public static volatile boolean sTokenDelivered = false;
-
-    // Ubisoft's login dashboard mints the session and produces a Google OAuth URL
-    // that includes the required state= parameter. We never open Google OAuth directly.
-    private static final String DASHBOARD_URL =
-            "https://login.growtopiagame.com/player/login/dashboard";
 
     private static LoginSpoof spoof() {
         if (Main.mainApp == null) return null;
@@ -51,10 +43,18 @@ public final class ZennKuyBridge {
     }
 
     /**
-     * Posts to Growtopia's login dashboard so Ubisoft mints a session and returns
-     * a Google OAuth URL that includes a valid state= parameter. The WebViewManager
-     * intercepts the resulting accounts.google.com redirect and opens it in Chrome.
-     * Chrome later redirects to grow://?token=<LTOKEN> which Main.onNewIntent handles.
+     * Replays the engine's last LoadURLPost call against Ubisoft's dashboard so that
+     * Ubisoft mints a session and returns a Google OAuth URL containing a valid state=
+     * parameter.  The WebViewManager intercepts the accounts.google.com redirect and
+     * opens it in Chrome; Chrome redirects to grow://?token=<LTOKEN> which
+     * Main.onNewIntent picks up and injects into the engine.
+     *
+     * The raw bytes cached in WebViewManager.sLastPostData are passed directly to
+     * webView.postUrl — they are never re-encoded so the engine's binary hash fields
+     * are preserved exactly.
+     *
+     * If the engine hasn't posted to the dashboard yet (sLastPostData == null), the
+     * user is told to tap Login / Play Online in the game first.
      */
     public static void startResolving() {
         sTokenDelivered = false;
@@ -63,25 +63,39 @@ public final class ZennKuyBridge {
             Log.e(TAG, "startResolving: mainApp is null");
             return;
         }
+
+        byte[] postData = WebViewManager.sLastPostData;
+        String dashboardUrl = WebViewManager.sLastDashboardUrl;
+
+        if (postData == null || postData.length == 0) {
+            act.runOnUiThread(() -> {
+                String msg = "No engine payload captured yet.\n"
+                        + "Please tap LOGIN / PLAY ONLINE in the game first,\n"
+                        + "then tap START RESOLVING again.";
+                Toast.makeText(act, msg, Toast.LENGTH_LONG).show();
+                try {
+                    new LoginSpoof(act).setGoogleLogs(
+                            "sLastPostData is null — tap Login in-game first.");
+                } catch (Exception ignored) {}
+            });
+            Log.w(TAG, "startResolving: sLastPostData not yet captured; aborting");
+            return;
+        }
+
+        if (dashboardUrl == null || dashboardUrl.isEmpty()) {
+            dashboardUrl = "https://login.growtopiagame.com/player/login/dashboard";
+        }
+
+        final String finalUrl = dashboardUrl;
+        final byte[] finalData = postData;
         act.runOnUiThread(() -> {
             try {
-                LoginSpoof s = new LoginSpoof(act);
-                String mac = s.getMac(); if (mac.isEmpty()) mac = s.generateMac();
-                String rid = s.getRid(); if (rid.isEmpty()) rid = s.generateRid();
-                String wk  = s.getWk();  if (wk.isEmpty())  wk  = s.generateWk();
-                Locale locale = Locale.getDefault();
-                String country = locale.getCountry().isEmpty() ? "US" : locale.getCountry();
-                String postBody = "platformID=4&deviceVersion=0"
-                        + "&mac=" + URLEncoder.encode(mac, "UTF-8")
-                        + "&rid=" + URLEncoder.encode(rid, "UTF-8")
-                        + "&wk="  + URLEncoder.encode(wk,  "UTF-8")
-                        + "&lmode=1"
-                        + "&country=" + URLEncoder.encode(locale.getLanguage() + "-" + country, "UTF-8")
-                        + "&hash=0";
-                byte[] postData = postBody.getBytes(StandardCharsets.UTF_8);
-                s.setGoogleLogs("Posting to dashboard to obtain state= …");
-                Log.d(TAG, "startResolving: posting to " + DASHBOARD_URL);
-                Main.mainApp.webViewManager.postOAuthDashboard(DASHBOARD_URL, postData);
+                new LoginSpoof(act).setGoogleLogs(
+                        "Replaying engine POST to dashboard ("
+                        + finalData.length + " bytes) — waiting for Google OAuth redirect …");
+                Log.d(TAG, "startResolving: POST to " + finalUrl
+                        + " (" + finalData.length + " bytes)");
+                Main.mainApp.webViewManager.postOAuthDashboard(finalUrl, finalData);
             } catch (Exception e) {
                 Log.e(TAG, "startResolving: " + e.getMessage());
             }

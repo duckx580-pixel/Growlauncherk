@@ -23,6 +23,12 @@ import java.util.concurrent.Executors;
 
 public class WebViewManager {
     public static String originalURL = "";
+
+    // Static cache of the last dashboard URL + raw POST bytes the engine sent via LoadURLPost.
+    // Populated before any ltoken short-circuit so ZennKuyBridge can replay the exact payload.
+    public static volatile String sLastDashboardUrl = "";
+    public static volatile byte[] sLastPostData = null;
+
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
@@ -103,7 +109,13 @@ public class WebViewManager {
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
-            if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            // Cache engine payload statically BEFORE the ltoken check so ZennKuyBridge
+            // can always replay the exact binary bytes the engine sent.
+            if (postData != null && postData.length > 0) {
+                sLastDashboardUrl = url;
+                sLastPostData = postData;
+                this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            }
             LoginSpoof spoof = getActiveSpoof();
             if (spoof != null) {
                 String ltoken = spoof.getLtoken();
@@ -118,18 +130,18 @@ public class WebViewManager {
     }
 
     /**
-     * Posts to the OAuth dashboard without the saved-token short-circuit.
-     * Used by ZennKuyBridge.startResolving() so Ubisoft always mints a fresh
+     * Replays the engine's last dashboard POST without the saved-token short-circuit.
+     * Uses the raw bytes cached by LoadURLPost so the binary payload is not re-encoded.
+     * Called by ZennKuyBridge.startResolving() so Ubisoft always mints a fresh
      * session and returns a Google OAuth URL containing the required state= param.
      */
-    public void postOAuthDashboard(final String url, final byte[] postData) {
+    public void postOAuthDashboard(final String url, final byte[] rawPostData) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             this.allowExternalLinks = false;
             originalURL = url;
             this.last_url = url;
-            if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             ShowWebView();
-            this.webView.postUrl(url, postData);
+            this.webView.postUrl(url, rawPostData);
         }));
     }
 
