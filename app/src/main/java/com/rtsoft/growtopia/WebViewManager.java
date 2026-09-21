@@ -9,7 +9,9 @@ import android.net.Uri;
 import android.os.Looper;
 import android.os.Message;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
+import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -87,8 +89,21 @@ public class WebViewManager {
                     }));
             wv.setWebChromeClient(new WebChromeClient() {
                 @Override
+                public boolean onConsoleMessage(ConsoleMessage cm) {
+                    String msg = cm.message() + " -- From line "
+                            + cm.lineNumber() + " of " + cm.sourceId();
+                    switch (cm.messageLevel()) {
+                        case ERROR:   AppLogger.error("WebJS", msg); break;
+                        case WARNING: AppLogger.warn("WebJS",  msg); break;
+                        default:      AppLogger.log("WebJS",   msg); break;
+                    }
+                    return true;
+                }
+
+                @Override
                 public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
-                    // Capture the URL that window.open() wants to load (e.g. Google OAuth).
+                    AppLogger.log("WVM", "onCreateWindow: isDialog=" + isDialog
+                            + " isUserGesture=" + isUserGesture);
                     WebView probe = new WebView(view.getContext());
                     probe.setWebViewClient(new WebViewClient() {
                         @Override
@@ -99,7 +114,7 @@ public class WebViewManager {
                         @Override @SuppressWarnings("deprecation")
                         public boolean shouldOverrideUrlLoading(WebView v, String url) {
                             if (url != null && !url.isEmpty()) {
-                                Log.d("WebViewManager", "onCreateWindow captured URL: " + url);
+                                AppLogger.log("WVM", "onCreateWindow→override: " + url);
                                 baseActivity.runOnUiThread(() -> {
                                     Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -111,7 +126,7 @@ public class WebViewManager {
                         @Override
                         public void onPageStarted(WebView v, String url, Bitmap favicon) {
                             if (url != null && !url.isEmpty() && !url.equals("about:blank")) {
-                                Log.d("WebViewManager", "onCreateWindow pageStarted URL: " + url);
+                                AppLogger.log("WVM", "onCreateWindow→pageStarted: " + url);
                                 baseActivity.runOnUiThread(() -> {
                                     Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -133,6 +148,13 @@ public class WebViewManager {
             s.setJavaScriptCanOpenWindowsAutomatically(true);
             wv.setBackgroundColor(0);
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
+            wv.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    AppLogger.log("WVM", "WebView touch DOWN x=" + (int)event.getX()
+                            + " y=" + (int)event.getY());
+                }
+                return false; // don't consume — let WebView handle it
+            });
             this.baseActivity.addContentView(wv, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         }
@@ -150,10 +172,11 @@ public class WebViewManager {
 
     public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            AppLogger.log("WVM", "LoadURLPost: " + url
+                    + " bytes=" + (postData == null ? 0 : postData.length));
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
-            // Cache URL and bytes before ltoken check so ZennKuyBridge can replay the POST.
             if (url != null && !url.isEmpty()) {
                 sLastLoginUrl = url;
             }
@@ -165,6 +188,7 @@ public class WebViewManager {
             if (spoof != null) {
                 String ltoken = spoof.getLtoken();
                 if (ltoken != null && !ltoken.isEmpty()) {
+                    AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
                     nativeOnScriptCall("nativeSignIn", ltoken);
                     return;
                 }
@@ -178,6 +202,8 @@ public class WebViewManager {
      *  then JS injection routes "Continue with Google" to Chrome. */
     public void postOAuthDashboard(final String url, final byte[] postData) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            AppLogger.log("WVM", "postOAuthDashboard: " + url
+                    + " bytes=" + (postData == null ? 0 : postData.length));
             this.allowExternalLinks = true;
             originalURL = url;
             ShowWebView();
@@ -271,13 +297,13 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void openInBrowser(final String url) {
-            Log.d("WebViewManager", "openInBrowser called with URL: " + url);
+            AppLogger.log("WVM", "openInBrowser called: " + url);
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
                 if (url == null || url.isEmpty()) {
-                    Log.w("WebViewManager", "openInBrowser: URL is null/empty, ignoring");
+                    AppLogger.warn("WVM", "openInBrowser: URL null/empty, ignoring");
                     return;
                 }
-                Log.d("WebViewManager", "openInBrowser dispatching to system browser: " + url);
+                AppLogger.log("WVM", "openInBrowser dispatching to browser: " + url);
                 Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 WebViewManager.this.baseActivity.startActivity(i);
@@ -295,25 +321,26 @@ public class WebViewManager {
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
             String url = req.getUrl() == null ? "" : req.getUrl().toString();
-            Log.d("WebViewManager", "shouldOverrideUrlLoading (req): " + url);
+            AppLogger.log("WVM", "override(req): " + url);
             return shouldOverrideUrlLoading(v, url);
         }
 
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
-            Log.d("WebViewManager", "shouldOverrideUrlLoading: " + url);
+            AppLogger.log("WVM", "override: " + url);
             try {
                 Uri next = Uri.parse(url == null ? "" : url);
                 String scheme = next.getScheme();
 
                 // grow:// — Ubisoft's post-OAuth redirect carrying the login token.
                 if ("grow".equalsIgnoreCase(scheme)) {
+                    AppLogger.log("WVM", "override: grow:// token redirect");
                     try {
                         Intent intent = new Intent(Intent.ACTION_VIEW, next);
                         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
                         this.baseActivity.startActivity(intent);
                     } catch (Exception ex) {
-                        Log.e("WebViewManager", "grow:// route failed: " + ex.getMessage());
+                        AppLogger.error("WVM", "grow:// route failed: " + ex.getMessage());
                     }
                     WebViewManager.this.HideWebView();
                     return true;
@@ -323,7 +350,7 @@ public class WebViewManager {
                 // Route any Google OAuth / account-selection URL to Chrome.
                 if (nh != null && (nh.contains("accounts.google.com")
                         || nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin")))) {
-                    Log.d("WebViewManager", "shouldOverrideUrlLoading: routing Google URL to Chrome: " + url);
+                    AppLogger.log("WVM", "override: Google URL → Chrome: " + url);
                     Intent i = new Intent(Intent.ACTION_VIEW, next);
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     this.baseActivity.startActivity(i);
@@ -339,14 +366,19 @@ public class WebViewManager {
                 this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                 return true;
             } catch (Exception e) {
-                Log.e("WebViewManager", "shouldOverrideUrlLoading error: " + e.getMessage());
+                AppLogger.error("WVM", "override error: " + e.getMessage());
                 return false;
             }
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            AppLogger.log("WVM", "onPageStarted: " + url);
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
-            Log.d("WebViewManager", "onPageFinished: " + url);
+            AppLogger.log("WVM", "onPageFinished: " + url);
             // Universal interceptor:
             // 1. Hook window.open() so popup navigation goes to Chrome.
             // 2. Global capture-phase click listener traverses the DOM upward to find
@@ -381,6 +413,8 @@ public class WebViewManager {
         @Override
         public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
             super.onReceivedError(v, req, err);
+            AppLogger.error("WVM", "onReceivedError code=" + err.getErrorCode()
+                    + " url=" + (req.getUrl() == null ? "?" : req.getUrl().toString()));
             this.listener.OnError(err.getErrorCode());
         }
     }

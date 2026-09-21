@@ -202,6 +202,10 @@ public class ZennKuyOverlay {
         clearBtn.setTextColor(Color.parseColor("#E74C3C"));
         GradientDrawable clearBg = roundedRect(Color.TRANSPARENT, Color.parseColor("#E74C3C"), 1, 8);
         clearBtn.setBackground(rippled(clearBg, Color.parseColor("#E74C3C")));
+        clearBtn.setOnClickListener(v -> {
+            AppLogger.clear();
+            android.widget.Toast.makeText(ctx, "Logs cleared", android.widget.Toast.LENGTH_SHORT).show();
+        });
         logRow.addView(logsBtn);
         logRow.addView(clearBtn);
         root.addView(logRow);
