@@ -221,6 +221,17 @@ public class WebViewManager {
                         try {
                             Main.ZennKuyRenderer.nativeBypassLogin(ltoken);
                             AppLogger.log("WVM", "LoadURLPost: ltoken shortcut nativeBypassLogin OK");
+                            // Wake engine connection loop immediately after token delivery.
+                            if (SharedActivity.mGLView != null) {
+                                SharedActivity.mGLView.queueEvent(() -> {
+                                    try {
+                                        Main.ZennKuyRenderer.nativeForcedOnlineMode(true);
+                                        AppLogger.log("WVM", "ltoken shortcut nativeForcedOnlineMode(true) fired");
+                                    } catch (Throwable ex) {
+                                        AppLogger.warn("WVM", "ltoken shortcut nativeForcedOnlineMode threw: " + ex.getMessage());
+                                    }
+                                });
+                            }
                         } catch (Throwable t) {
                             AppLogger.error("WVM", "LoadURLPost: ltoken nativeBypassLogin threw: " + t.getMessage());
                         }
