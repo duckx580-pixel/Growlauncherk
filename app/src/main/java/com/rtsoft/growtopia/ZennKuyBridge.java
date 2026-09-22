@@ -8,6 +8,8 @@ public final class ZennKuyBridge {
     private ZennKuyBridge() {}
 
     public static volatile boolean sTokenDelivered = false;
+    /** Epoch ms when sTokenDelivered was last set true. Used to time-gate suppression. */
+    public static volatile long sTokenDeliveredAt = 0;
 
     private static DeviceSpoofer deviceSpoofer() {
         if (Main.mainApp == null) return null;

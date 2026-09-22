@@ -11,6 +11,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Toast;
 
 import com.ubisoft.bridge.JavaInterface;
 
@@ -155,7 +156,10 @@ public class Main extends SharedActivity {
         spoof.setLtoken(finalToken);
         spoof.setEnabled(true);
         ZennKuyBridge.sTokenDelivered = true;
+        ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
         webViewManager.HideWebView();
+        runOnUiThread(() -> Toast.makeText(this,
+                "Token received — verifying login…", Toast.LENGTH_SHORT).show());
 
         AppLogger.log("GrowDeepLink", "Calling nativeSignIn with token (len=" + finalToken.length() + ")");
         try {

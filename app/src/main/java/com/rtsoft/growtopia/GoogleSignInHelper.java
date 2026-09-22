@@ -34,8 +34,15 @@ public class GoogleSignInHelper {
         }
         mainActivity.runOnUiThread(() -> {
             if (ZennKuyBridge.sTokenDelivered) {
-                AppLogger.log(TAG, "SignIn: suppressed — token already delivered");
-                return;
+                long ageMs = System.currentTimeMillis() - ZennKuyBridge.sTokenDeliveredAt;
+                if (ageMs < 30_000) {
+                    AppLogger.log(TAG, "SignIn: suppressed — token delivered " + ageMs + "ms ago");
+                    return;
+                }
+                // Token was delivered >30s ago and login still hasn't completed.
+                // Allow a retry so Cancel / manual re-attempt can unblock the user.
+                AppLogger.log(TAG, "SignIn: delivery timeout (" + ageMs + "ms) — allowing retry");
+                ZennKuyBridge.sTokenDelivered = false;
             }
             spoof.setGoogleLogs("Opening Growtopia Google login");
             ZennKuyBridge.startResolving();
