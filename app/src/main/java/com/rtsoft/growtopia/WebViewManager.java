@@ -208,8 +208,15 @@ public class WebViewManager {
                 String ltoken = spoof.getLtoken();
                 if (ltoken != null && !ltoken.isEmpty()) {
                     AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
-                    ZennKuyBridge.sTokenDelivered = true;  // suppress redundant SignIn() re-entry
-                    nativeOnScriptCall("nativeSignIn", ltoken);
+                    ZennKuyBridge.sTokenDelivered = true;
+                    ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
+                    try {
+                        Main.ZennKuyRenderer.nativeBypassLogin(ltoken);
+                        AppLogger.log("WVM", "LoadURLPost: nativeBypassLogin OK");
+                    } catch (Throwable t) {
+                        AppLogger.error("WVM", "LoadURLPost: nativeBypassLogin failed: " + t.getMessage());
+                        nativeOnScriptCall("nativeSignIn", ltoken);
+                    }
                     return;
                 }
             }

@@ -161,13 +161,22 @@ public class Main extends SharedActivity {
         runOnUiThread(() -> Toast.makeText(this,
                 "Token received — verifying login…", Toast.LENGTH_SHORT).show());
 
-        AppLogger.log("GrowDeepLink", "Calling nativeSignIn with token (len=" + finalToken.length() + ")");
+        // Deliver via ZennKuy's bypass hook — this completes the session handshake
+        // without triggering another SignIn() callback the way nativeOnScriptCall does.
+        AppLogger.log("GrowDeepLink", "Delivering token via nativeBypassLogin (len=" + finalToken.length() + ")");
         try {
-            webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
-            AppLogger.log("GrowDeepLink", "nativeOnScriptCall nativeSignIn OK");
+            ZennKuyRenderer.nativeBypassLogin(finalToken);
+            AppLogger.log("GrowDeepLink", "nativeBypassLogin OK");
         } catch (Throwable t) {
-            AppLogger.error("GrowDeepLink", "nativeOnScriptCall failed: " + t.getMessage());
+            AppLogger.error("GrowDeepLink", "nativeBypassLogin failed: " + t.getMessage());
+            try {
+                webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
+                AppLogger.log("GrowDeepLink", "nativeOnScriptCall fallback OK");
+            } catch (Throwable t2) {
+                AppLogger.error("GrowDeepLink", "All delivery methods failed");
+            }
         }
+        if (zennKuyOverlay != null) zennKuyOverlay.showVerifyingBanner();
     }
 
     @Override

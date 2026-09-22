@@ -1,5 +1,9 @@
 package com.rtsoft.growtopia;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ObjectAnimator;
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -20,6 +24,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.ScrollView;
@@ -275,6 +280,52 @@ public class ZennKuyOverlay {
             }
         });
         b.show();
+    }
+
+    /** Shows a floating green pill "✓ Verifying login…" that fades out after ~3 s. */
+    public void showVerifyingBanner() {
+        if (!(ctx instanceof Activity)) return;
+        Activity act = (Activity) ctx;
+        act.runOnUiThread(() -> {
+            TextView pill = new TextView(ctx);
+            pill.setText("✓ Verifying login…");
+            pill.setTextColor(Color.WHITE);
+            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            pill.setTypeface(null, Typeface.BOLD);
+            pill.setPadding(dp(16), dp(8), dp(16), dp(8));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.argb(230, 30, 158, 82));
+            bg.setCornerRadius(dp(20));
+            pill.setBackground(bg);
+            pill.setAlpha(0f);
+
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.START);
+            lp.topMargin  = dp(72);
+            lp.leftMargin = dp(12);
+
+            ViewGroup root = act.getWindow().getDecorView().findViewById(android.R.id.content);
+            root.addView(pill, lp);
+
+            ObjectAnimator fadeIn = ObjectAnimator.ofFloat(pill, "alpha", 0f, 1f);
+            fadeIn.setDuration(250);
+            fadeIn.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator a) {
+                    pill.postDelayed(() -> {
+                        ObjectAnimator fadeOut = ObjectAnimator.ofFloat(pill, "alpha", 1f, 0f);
+                        fadeOut.setDuration(500);
+                        fadeOut.addListener(new AnimatorListenerAdapter() {
+                            @Override public void onAnimationEnd(Animator a2) {
+                                root.removeView(pill);
+                            }
+                        });
+                        fadeOut.start();
+                    }, 2500);
+                }
+            });
+            fadeIn.start();
+        });
     }
 
     private void startResolving() {
