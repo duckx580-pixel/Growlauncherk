@@ -144,12 +144,12 @@ public class Main extends SharedActivity {
         String token = data.getQueryParameter("token");
         if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
         if (token == null || token.isEmpty()) {
-            Log.w("GrowDeepLink", "grow:// intent had no token/info param: " + data);
+            AppLogger.warn("GrowDeepLink", "grow:// intent had no token/info param: " + data);
             return;
         }
 
         final String finalToken = token;
-        Log.d("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
+        AppLogger.log("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
         LoginSpoof spoof = new LoginSpoof(this);
         spoof.setLtoken(finalToken);
         spoof.setEnabled(true);

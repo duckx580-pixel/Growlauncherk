@@ -34,7 +34,10 @@ public final class AppLogger {
     public static void initFileLog(Context context) {
         if (logFile != null) return;
         try {
-            File f = new File(context.getApplicationContext().getFilesDir(), "debug_login.log");
+            Context app = context.getApplicationContext();
+            File logDir = app.getExternalFilesDir(null);
+            if (logDir == null) logDir = app.getFilesDir();
+            File f = new File(logDir, "debug_login.log");
             // Rotate: keep at most 512 KB
             if (f.exists() && f.length() > 512 * 1024) {
                 //noinspection ResultOfMethodCallIgnored

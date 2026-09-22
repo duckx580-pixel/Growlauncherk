@@ -1,7 +1,6 @@
 package com.rtsoft.growtopia;
 
 import android.app.Activity;
-import android.util.Log;
 import android.widget.Toast;
 
 public final class ZennKuyBridge {
@@ -69,11 +68,12 @@ public final class ZennKuyBridge {
         sTokenDelivered = false;
         Activity act = Main.mainApp;
         if (act == null) {
-            Log.e(TAG, "startResolving: mainApp is null");
+            AppLogger.error(TAG, "startResolving: mainApp is null");
             return;
         }
 
         String loginUrl = WebViewManager.sLastLoginUrl;
+        AppLogger.log(TAG, "startResolving: loginUrl=" + loginUrl);
         if (loginUrl == null || loginUrl.isEmpty()) {
             act.runOnUiThread(() -> {
                 Toast.makeText(act,
@@ -81,28 +81,29 @@ public final class ZennKuyBridge {
                         + "Please tap PLAY ONLINE in the game first,\n"
                         + "then tap LOGIN TOKEN again.",
                         Toast.LENGTH_LONG).show();
+                AppLogger.warn(TAG, "sLastLoginUrl is null — tap Play Online first");
                 try { new LoginSpoof(act).setGoogleLogs("sLastLoginUrl is null — tap Play Online first."); }
                 catch (Exception ignored) {}
             });
-            Log.w(TAG, "startResolving: sLastLoginUrl not captured yet; aborting");
             return;
         }
 
         final String finalUrl = loginUrl;
         final byte[] postData = WebViewManager.sLastPostData;
+        AppLogger.log(TAG, "startResolving: postData bytes=" + (postData == null ? 0 : postData.length));
         act.runOnUiThread(() -> {
             try {
                 new LoginSpoof(act).setGoogleLogs("Posting login via WebView: " + finalUrl);
-                Log.d(TAG, "startResolving: posting to WebView → " + finalUrl);
+                AppLogger.log(TAG, "startResolving: posting to WebView → " + finalUrl);
                 WebViewManager wvm = Main.GetWebViewManager();
                 if (wvm != null) {
                     wvm.postOAuthDashboard(finalUrl, postData);
                 } else {
-                    Log.e(TAG, "startResolving: WebViewManager is null");
+                    AppLogger.error(TAG, "startResolving: WebViewManager is null");
                     Toast.makeText(act, "Could not open login WebView.", Toast.LENGTH_LONG).show();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "startResolving: " + e.getMessage());
+                AppLogger.error(TAG, "startResolving: " + e.getMessage());
                 Toast.makeText(act, "Could not start login: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
         });
