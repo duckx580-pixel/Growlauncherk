@@ -150,10 +150,7 @@ public class Main extends SharedActivity {
 
         final String finalToken = token;
         AppLogger.log("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
-        LoginSpoof spoof = new LoginSpoof(this);
-        spoof.setLtoken(finalToken);
-        spoof.setEnabled(true);
-        spoof.setGoogleLogs("Token received via grow:// deep link (len=" + finalToken.length() + ")");
+        new LoginSpoof(this).setGoogleLogs("Token received via grow:// deep link (len=" + finalToken.length() + ")");
         ZennKuyBridge.sTokenDelivered = true;
         webViewManager.HideWebView();
 

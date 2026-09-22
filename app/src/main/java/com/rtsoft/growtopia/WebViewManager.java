@@ -195,13 +195,18 @@ public class WebViewManager {
                 sLastPostData = postData;
                 this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             }
-            LoginSpoof spoof = getActiveSpoof();
-            if (spoof != null) {
-                String ltoken = spoof.getLtoken();
-                if (ltoken != null && !ltoken.isEmpty()) {
-                    AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
-                    nativeOnScriptCall("nativeSignIn", ltoken);
-                    return;
+            // Ltoken shortcut: only when no token has been delivered via grow://.
+            // After sTokenDelivered=true the engine needs its LoadURLPost to reach
+            // Ubisoft's servers for session verification — do not skip the WebView.
+            if (!ZennKuyBridge.sTokenDelivered) {
+                LoginSpoof spoof = getActiveSpoof();
+                if (spoof != null) {
+                    String ltoken = spoof.getLtoken();
+                    if (ltoken != null && !ltoken.isEmpty()) {
+                        AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
+                        nativeOnScriptCall("nativeSignIn", ltoken);
+                        return;
+                    }
                 }
             }
             ShowWebView();
