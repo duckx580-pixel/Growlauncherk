@@ -34,6 +34,11 @@ public class WebViewManager {
     public static volatile String sLastLoginUrl  = "";
     public static volatile byte[] sLastPostData  = null;
 
+    // Set to true only by postOAuthDashboard (ZennKuy overlay "LOGIN TOKEN") so the
+    // shouldOverrideUrlLoading dashboard→google/redirect handoff fires only for that path,
+    // not for every normal engine LoadURLPost (which should show the dashboard to the user).
+    public static volatile boolean sZennKuyRedirectActive = false;
+
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
@@ -198,9 +203,10 @@ public class WebViewManager {
         }));
     }
 
-    /** Replays the engine's last login POST in the WebView so the login page loads,
-     *  then JS injection routes "Continue with Google" to Chrome. */
+    /** Replays the engine's last login POST in the WebView, then auto-redirects the
+     *  Ubisoft dashboard token to /google/redirect so Chrome handles the account pick. */
     public void postOAuthDashboard(final String url, final byte[] postData) {
+        sZennKuyRedirectActive = true; // arm the dashboard→Chrome intercept for this POST only
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             AppLogger.log("WVM", "postOAuthDashboard: " + url
                     + " bytes=" + (postData == null ? 0 : postData.length));
@@ -353,11 +359,13 @@ public class WebViewManager {
 
                 String nh = next.getHost();
 
-                // Ubisoft dashboard redirect — the device POST was accepted.
-                // Swap /player/login/dashboard → /google/redirect (same token), fire Chrome.
-                // The WebView is only a silent POST transport; the user never needs to see this page.
+                // Ubisoft dashboard redirect — only intercept when ZennKuy overlay triggered it.
+                // Normal engine logins (Play Online) let the WebView load the dashboard normally
+                // so the user sees the "Select an account" dialog as the engine intends.
                 if (nh != null && nh.contains("login.growtopiagame.com")
-                        && url.contains("/player/login/dashboard")) {
+                        && url.contains("/player/login/dashboard")
+                        && WebViewManager.sZennKuyRedirectActive) {
+                    WebViewManager.sZennKuyRedirectActive = false; // consume the flag
                     String googleUrl = url.replace("/player/login/dashboard", "/google/redirect");
                     AppLogger.log("WVM", "dashboard→google/redirect → Chrome: " + googleUrl);
                     Toast.makeText(this.baseActivity,

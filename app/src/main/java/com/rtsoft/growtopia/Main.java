@@ -157,10 +157,18 @@ public class Main extends SharedActivity {
         ZennKuyBridge.sTokenDelivered = true;
         webViewManager.HideWebView();
 
+        // Deliver the token to the native engine the same way the ltoken shortcut does
+        // (nativeOnScriptCall on the UI thread) which is confirmed to work.
+        // Also attempt OnSignIn on the GL thread as a secondary path.
+        AppLogger.log("GrowDeepLink", "Calling nativeSignIn with token (len=" + finalToken.length() + ")");
+        try {
+            webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
+            AppLogger.log("GrowDeepLink", "nativeOnScriptCall nativeSignIn OK");
+        } catch (Throwable t) {
+            AppLogger.error("GrowDeepLink", "nativeOnScriptCall failed: " + t.getMessage());
+        }
         if (googleSignInHelper != null) {
             googleSignInHelper.deliverResult(0, finalToken);
-        } else {
-            webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
         }
     }
 
