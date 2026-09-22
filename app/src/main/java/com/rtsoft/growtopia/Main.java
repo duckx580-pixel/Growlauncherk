@@ -151,32 +151,16 @@ public class Main extends SharedActivity {
 
         final String finalToken = token;
         AppLogger.log("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
-        LoginSpoof spoof = new LoginSpoof(this);
-        spoof.setGoogleLogs("Token received via grow:// deep link (len=" + finalToken.length() + ")");
-        spoof.setLtoken(finalToken);
-        spoof.setEnabled(true);
         ZennKuyBridge.sTokenDelivered = true;
         ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
         webViewManager.HideWebView();
         runOnUiThread(() -> Toast.makeText(this,
                 "Token received — verifying login…", Toast.LENGTH_SHORT).show());
-
-        // Deliver via ZennKuy's bypass hook — this completes the session handshake
-        // without triggering another SignIn() callback the way nativeOnScriptCall does.
-        AppLogger.log("GrowDeepLink", "Delivering token via nativeBypassLogin (len=" + finalToken.length() + ")");
-        try {
-            ZennKuyRenderer.nativeBypassLogin(finalToken);
-            AppLogger.log("GrowDeepLink", "nativeBypassLogin OK");
-        } catch (Throwable t) {
-            AppLogger.error("GrowDeepLink", "nativeBypassLogin failed: " + t.getMessage());
-            try {
-                webViewManager.nativeOnScriptCall("nativeSignIn", finalToken);
-                AppLogger.log("GrowDeepLink", "nativeOnScriptCall fallback OK");
-            } catch (Throwable t2) {
-                AppLogger.error("GrowDeepLink", "All delivery methods failed");
-            }
-        }
         if (zennKuyOverlay != null) zennKuyOverlay.showVerifyingBanner();
+
+        // Deliver via OnSignIn on the GL thread — engine verifies via /google/native/callback POST.
+        AppLogger.log("GrowDeepLink", "Delivering token via OnSignIn GL (len=" + finalToken.length() + ")");
+        googleSignInHelper.deliverResult(0, finalToken);
     }
 
     @Override
