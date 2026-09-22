@@ -34,8 +34,7 @@ public class GoogleSignInHelper {
         }
         mainActivity.runOnUiThread(() -> {
             if (ZennKuyBridge.sTokenDelivered) {
-                AppLogger.log(TAG, "SignIn: suppressed — token just delivered, skipping startResolving");
-                ZennKuyBridge.sTokenDelivered = false;
+                AppLogger.log(TAG, "SignIn: suppressed — token already delivered");
                 return;
             }
             spoof.setGoogleLogs("Opening Growtopia Google login");

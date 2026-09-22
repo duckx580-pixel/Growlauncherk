@@ -278,6 +278,7 @@ public class ZennKuyOverlay {
     }
 
     private void startResolving() {
+        ZennKuyBridge.sTokenDelivered = false;  // user explicitly starting a new login
         ZennKuyBridge.startResolving();
     }
 

@@ -65,7 +65,10 @@ public final class ZennKuyBridge {
      *  5. Main.onNewIntent extracts token → nativeOnScriptCall("nativeSignIn", token)
      */
     public static void startResolving() {
-        sTokenDelivered = false;
+        if (sTokenDelivered) {
+            AppLogger.log(TAG, "startResolving: suppressed — token already delivered");
+            return;
+        }
         Activity act = Main.mainApp;
         if (act == null) {
             AppLogger.error(TAG, "startResolving: mainApp is null");
