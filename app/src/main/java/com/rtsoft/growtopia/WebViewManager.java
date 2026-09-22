@@ -204,7 +204,7 @@ public class WebViewManager {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             AppLogger.log("WVM", "postOAuthDashboard: " + url
                     + " bytes=" + (postData == null ? 0 : postData.length));
-            Toast.makeText(this.baseActivity, "Dashboard POST sent — waiting for Google URL…",
+            Toast.makeText(this.baseActivity, "Connecting to Growtopia login…",
                     Toast.LENGTH_SHORT).show();
             this.allowExternalLinks = true;
             originalURL = url;
@@ -352,10 +352,27 @@ public class WebViewManager {
                 }
 
                 String nh = next.getHost();
-                // Route any Google OAuth / account-selection URL to Chrome.
+
+                // Ubisoft dashboard redirect — the device POST was accepted.
+                // Swap /player/login/dashboard → /google/redirect (same token), fire Chrome.
+                // The WebView is only a silent POST transport; the user never needs to see this page.
+                if (nh != null && nh.contains("login.growtopiagame.com")
+                        && url.contains("/player/login/dashboard")) {
+                    String googleUrl = url.replace("/player/login/dashboard", "/google/redirect");
+                    AppLogger.log("WVM", "dashboard→google/redirect → Chrome: " + googleUrl);
+                    Toast.makeText(this.baseActivity,
+                            "Opening Google login in Chrome…", Toast.LENGTH_SHORT).show();
+                    WebViewManager.this.HideWebView();
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(googleUrl));
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    this.baseActivity.startActivity(i);
+                    return true;
+                }
+
+                // Fallback: any Google OAuth page that somehow slipped through above.
                 if (nh != null && (nh.contains("accounts.google.com")
-                        || nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin")))) {
-                    AppLogger.log("WVM", "override: Google URL → Chrome: " + url);
+                        || (nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin"))))) {
+                    AppLogger.log("WVM", "override: Google OAuth URL → Chrome: " + url);
                     Toast.makeText(this.baseActivity,
                             "Launching Chrome for Google login…", Toast.LENGTH_SHORT).show();
                     WebViewManager.this.HideWebView();
@@ -368,8 +385,7 @@ public class WebViewManager {
                 Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 String oh = orig.getHost();
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
-                    v.loadUrl(url);
-                    return true;
+                    return false; // let WebView handle same-origin navigation normally
                 }
                 this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                 return true;
@@ -387,45 +403,6 @@ public class WebViewManager {
         @Override
         public void onPageFinished(WebView view, String url) {
             AppLogger.log("WVM", "onPageFinished: " + url);
-            // Automatic Google auth handoff — no user tap needed:
-            // Pass 1: scan every <a> for a direct Google OAuth href and call openInBrowser.
-            // Pass 2: find the "Continue with Google" button and auto-click it;
-            //         the resulting navigation is caught by shouldOverrideUrlLoading.
-            // Pass 3: install window.open hook + global capture-phase listener as fallback.
-            view.loadUrl("javascript:(function(){"
-                // --- window.open hook ---
-                + "window.open=function(u){if(u){NativeApp.openInBrowser(u);}return null;};"
-                // --- Pass 1: direct href scan ---
-                + "(function(){"
-                +   "var links=document.querySelectorAll('a[href]');"
-                +   "for(var i=0;i<links.length;i++){"
-                +     "var h=links[i].href||'';"
-                +     "if(h.indexOf('accounts.google.com')!==-1||h.indexOf('google.com/o/oauth2')!==-1){"
-                +       "NativeApp.openInBrowser(h);return;"
-                +     "}"
-                +   "}"
-                // --- Pass 2: auto-click the Google button ---
-                +   "var all=document.querySelectorAll('button,a,div[role=\"button\"],span');"
-                +   "for(var j=0;j<all.length;j++){"
-                +     "var txt=(all[j].innerText||all[j].textContent||'').trim();"
-                +     "if(txt==='Continue with Google'||txt==='Google'){"
-                +       "all[j].click();return;"
-                +     "}"
-                +   "}"
-                + "})();"
-                // --- Pass 3: global capture-phase click fallback ---
-                + "document.addEventListener('click',function(e){"
-                +   "var el=e.target;"
-                +   "while(el&&el!==document){"
-                +     "var href=el.href||el.getAttribute('data-url')||'';"
-                +     "if(href&&(href.indexOf('accounts.google.com')!==-1||href.indexOf('google.com/o/oauth2')!==-1)){"
-                +       "e.preventDefault();e.stopPropagation();"
-                +       "NativeApp.openInBrowser(href);return;"
-                +     "}"
-                +     "el=el.parentElement;"
-                +   "}"
-                + "},true);"
-                + "})()");
             this.listener.OnPageLoaded(url);
         }
 
