@@ -197,18 +197,32 @@ public class WebViewManager {
                 ZennKuyBridge.sTokenDelivered = false;
                 AppLogger.log("WVM", "LoadURLPost: checktoken — reset sTokenDelivered");
             }
-            // Ltoken shortcut: only on checktoken (the entry point), never on the engine's
-            // /google/native/callback verification request which must reach Ubisoft's server.
+
+            // /google/native/callback: the growtopia engine fires this after OnSignIn() to exchange
+            // an OAuth code for an ltoken. When ZennKuy has already ingested the ltoken via
+            // nativeBypassLogin (sTokenDelivered=true), this call is redundant and will hit
+            // Ubisoft's 30-second rate limiter. Drop it — ZennKuy handles the game connection.
+            // (Mirrors Real Growlauncher's isLtokenSpoofActive() gate in LoadURLPost.)
+            if (url != null && url.contains("/google/native/callback") && ZennKuyBridge.sTokenDelivered) {
+                AppLogger.log("WVM", "LoadURLPost: suppressing native/callback — ZennKuy bypass active");
+                return;
+            }
+
+            // Ltoken shortcut: only on checktoken (the entry point). Deliver via nativeBypassLogin
+            // so ZennKuy handles the session without a /google/native/callback round-trip.
             if (url != null && url.contains("checktoken")) {
                 LoginSpoof spoof = getActiveSpoof();
                 if (spoof != null) {
                     String ltoken = spoof.getLtoken();
                     if (ltoken != null && !ltoken.isEmpty()) {
-                        AppLogger.log("WVM", "LoadURLPost: ltoken shortcut — delivering via OnSignIn");
+                        AppLogger.log("WVM", "LoadURLPost: ltoken shortcut — delivering via nativeBypassLogin");
                         ZennKuyBridge.sTokenDelivered = true;
                         ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
-                        if (Main.mainApp != null && Main.mainApp.googleSignInHelper != null) {
-                            Main.mainApp.googleSignInHelper.deliverResult(0, ltoken);
+                        try {
+                            Main.ZennKuyRenderer.nativeBypassLogin(ltoken);
+                            AppLogger.log("WVM", "LoadURLPost: ltoken shortcut nativeBypassLogin OK");
+                        } catch (Throwable t) {
+                            AppLogger.error("WVM", "LoadURLPost: ltoken nativeBypassLogin threw: " + t.getMessage());
                         }
                         return;
                     }

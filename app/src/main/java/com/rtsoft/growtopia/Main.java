@@ -158,9 +158,16 @@ public class Main extends SharedActivity {
                 "Token received — verifying login…", Toast.LENGTH_SHORT).show());
         if (zennKuyOverlay != null) zennKuyOverlay.showVerifyingBanner();
 
-        // Deliver via OnSignIn on the GL thread — engine verifies via /google/native/callback POST.
-        AppLogger.log("GrowDeepLink", "Delivering token via OnSignIn GL (len=" + finalToken.length() + ")");
-        googleSignInHelper.deliverResult(0, finalToken);
+        // Deliver via ZennKuy's nativeBypassLogin — ZennKuy ingests the ltoken and completes the
+        // game session handshake internally, without triggering the growtopia engine's own
+        // /google/native/callback HTTP verification round-trip that Ubisoft rate-limits.
+        AppLogger.log("GrowDeepLink", "Delivering token via nativeBypassLogin (len=" + finalToken.length() + ")");
+        try {
+            ZennKuyRenderer.nativeBypassLogin(finalToken);
+            AppLogger.log("GrowDeepLink", "nativeBypassLogin OK");
+        } catch (Throwable t) {
+            AppLogger.error("GrowDeepLink", "nativeBypassLogin threw: " + t.getMessage());
+        }
     }
 
     @Override
