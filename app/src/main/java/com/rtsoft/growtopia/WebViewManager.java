@@ -195,18 +195,22 @@ public class WebViewManager {
                 sLastPostData = postData;
                 this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
             }
-            // Ltoken shortcut: only when no token has been delivered via grow://.
-            // After sTokenDelivered=true the engine needs its LoadURLPost to reach
-            // Ubisoft's servers for session verification — do not skip the WebView.
-            if (!ZennKuyBridge.sTokenDelivered) {
-                LoginSpoof spoof = getActiveSpoof();
-                if (spoof != null) {
-                    String ltoken = spoof.getLtoken();
-                    if (ltoken != null && !ltoken.isEmpty()) {
-                        AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
-                        nativeOnScriptCall("nativeSignIn", ltoken);
-                        return;
-                    }
+            // On each checktoken call the engine is asking to verify/complete auth.
+            // Reset the delivery flag so the ltoken shortcut can fire and the engine's
+            // follow-up SignIn() calls are not suppressed if the ltoken is stale.
+            if (url != null && url.contains("checktoken")) {
+                ZennKuyBridge.sTokenDelivered = false;
+                AppLogger.log("WVM", "LoadURLPost: checktoken — reset sTokenDelivered for ltoken shortcut");
+            }
+            // Ltoken shortcut: if we have a saved ltoken, skip the WebView and deliver directly.
+            LoginSpoof spoof = getActiveSpoof();
+            if (spoof != null) {
+                String ltoken = spoof.getLtoken();
+                if (ltoken != null && !ltoken.isEmpty()) {
+                    AppLogger.log("WVM", "LoadURLPost: ltoken shortcut active, skipping WebView");
+                    ZennKuyBridge.sTokenDelivered = true;  // suppress redundant SignIn() re-entry
+                    nativeOnScriptCall("nativeSignIn", ltoken);
+                    return;
                 }
             }
             ShowWebView();
