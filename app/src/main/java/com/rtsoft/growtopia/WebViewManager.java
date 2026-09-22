@@ -179,6 +179,12 @@ public class WebViewManager {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
             AppLogger.log("WVM", "LoadURLPost: " + url
                     + " bytes=" + (postData == null ? 0 : postData.length));
+            // Engine's native callback URL — let it complete without any WebView interference.
+            // Must not overwrite sLastLoginUrl or trigger the ltoken shortcut.
+            if (url != null && url.contains("/google/native/callback")) {
+                AppLogger.log("WVM", "LoadURLPost: native callback URL, skipping");
+                return;
+            }
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
