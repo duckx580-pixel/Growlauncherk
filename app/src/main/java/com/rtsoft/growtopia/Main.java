@@ -158,17 +158,6 @@ public class Main extends SharedActivity {
                 "Token received — verifying login…", Toast.LENGTH_SHORT).show());
         if (zennKuyOverlay != null) zennKuyOverlay.showVerifyingBanner();
 
-        // Persist ltoken so the engine's 30-second retry (checktoken → ltoken shortcut) can
-        // reuse it without asking the user to pick their Google account again.
-        try {
-            LoginSpoof spoof = new LoginSpoof(this);
-            spoof.setLtoken(finalToken);
-            spoof.setEnabled(true);
-            AppLogger.log("GrowDeepLink", "ltoken persisted to LoginSpoof");
-        } catch (Throwable t) {
-            AppLogger.warn("GrowDeepLink", "LoginSpoof persist failed: " + t.getMessage());
-        }
-
         // Deliver via ZennKuy's nativeBypassLogin — ZennKuy ingests the ltoken and completes the
         // game session handshake internally, without triggering the growtopia engine's own
         // /google/native/callback HTTP verification round-trip that Ubisoft rate-limits.
