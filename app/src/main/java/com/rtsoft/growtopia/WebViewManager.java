@@ -3,19 +3,24 @@ package com.rtsoft.growtopia;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
-import android.widget.Toast;
+import android.view.MotionEvent;
 import android.view.ViewGroup;
+import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -23,6 +28,17 @@ import java.util.concurrent.Executors;
 
 public class WebViewManager {
     public static String originalURL = "";
+
+    // URL and binary payload the engine last passed to LoadURLPost.
+    // Cached before any ltoken short-circuit so ZennKuyBridge.startResolving() can replay them.
+    public static volatile String sLastLoginUrl  = "";
+    public static volatile byte[] sLastPostData  = null;
+
+    // Set to true only by postOAuthDashboard (ZennKuy overlay "LOGIN TOKEN") so the
+    // shouldOverrideUrlLoading dashboard→google/redirect handoff fires only for that path,
+    // not for every normal engine LoadURLPost (which should show the dashboard to the user).
+    public static volatile boolean sZennKuyRedirectActive = false;
+
     private Activity baseActivity;
     private final ExecutorService webViewWorkExecutor;
     boolean allowExternalLinks = true;
@@ -76,6 +92,60 @@ public class WebViewManager {
                         @Override public void OnError(int e) { nativeOnErrorOccurred(e); }
                         @Override public void OnPageLoaded(String url) { nativeOnPageLoaded(url); }
                     }));
+            wv.setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onConsoleMessage(ConsoleMessage cm) {
+                    String msg = cm.message() + " -- From line "
+                            + cm.lineNumber() + " of " + cm.sourceId();
+                    switch (cm.messageLevel()) {
+                        case ERROR:   AppLogger.error("WebJS", msg); break;
+                        case WARNING: AppLogger.warn("WebJS",  msg); break;
+                        default:      AppLogger.log("WebJS",   msg); break;
+                    }
+                    return true;
+                }
+
+                @Override
+                public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                    AppLogger.log("WVM", "onCreateWindow: isDialog=" + isDialog
+                            + " isUserGesture=" + isUserGesture);
+                    WebView probe = new WebView(view.getContext());
+                    probe.setWebViewClient(new WebViewClient() {
+                        @Override
+                        public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                            return shouldOverrideUrlLoading(v,
+                                    req.getUrl() == null ? "" : req.getUrl().toString());
+                        }
+                        @Override @SuppressWarnings("deprecation")
+                        public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                            if (url != null && !url.isEmpty()) {
+                                AppLogger.log("WVM", "onCreateWindow→override: " + url);
+                                baseActivity.runOnUiThread(() -> {
+                                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    baseActivity.startActivity(i);
+                                });
+                            }
+                            return true;
+                        }
+                        @Override
+                        public void onPageStarted(WebView v, String url, Bitmap favicon) {
+                            if (url != null && !url.isEmpty() && !url.equals("about:blank")) {
+                                AppLogger.log("WVM", "onCreateWindow→pageStarted: " + url);
+                                baseActivity.runOnUiThread(() -> {
+                                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    baseActivity.startActivity(i);
+                                });
+                            }
+                        }
+                    });
+                    WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                    transport.setWebView(probe);
+                    resultMsg.sendToTarget();
+                    return true;
+                }
+            });
             WebSettings s = wv.getSettings();
             s.setJavaScriptEnabled(true);
             s.setDomStorageEnabled(true);
@@ -83,6 +153,13 @@ public class WebViewManager {
             s.setJavaScriptCanOpenWindowsAutomatically(true);
             wv.setBackgroundColor(0);
             wv.addJavascriptInterface(new WebViewJavascriptInterface(this), "NativeApp");
+            wv.setOnTouchListener((v, event) -> {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                    AppLogger.log("WVM", "WebView touch DOWN x=" + (int)event.getX()
+                            + " y=" + (int)event.getY());
+                }
+                return false; // don't consume — let WebView handle it
+            });
             this.baseActivity.addContentView(wv, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         }
@@ -100,20 +177,90 @@ public class WebViewManager {
 
     public void LoadURLPost(final String url, final byte[] postData, final boolean allowExternal) {
         this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            AppLogger.log("WVM", "LoadURLPost: " + url
+                    + " bytes=" + (postData == null ? 0 : postData.length));
             this.allowExternalLinks = allowExternal;
             originalURL = url;
             this.last_url = url;
-            if (postData != null) this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
-            LoginSpoof spoof = getActiveSpoof();
-            if (spoof != null) {
-                String ltoken = spoof.getLtoken();
-                if (ltoken != null && !ltoken.isEmpty()) {
-                    nativeOnScriptCall("nativeSignIn", ltoken);
-                    return;
+            // Cache URL/data for ZennKuy overlay replay, but not native callback requests
+            // (those are engine-internal and must not be replayed as a login entry point).
+            if (url != null && !url.isEmpty() && !url.contains("/google/native/callback")) {
+                sLastLoginUrl = url;
+            }
+            if (postData != null && postData.length > 0) {
+                sLastPostData = postData;
+                this.last_packet = new String(postData, StandardCharsets.ISO_8859_1);
+            }
+            // On each checktoken the engine is starting a new auth round — reset so SignIn()
+            // can fire and the ltoken shortcut (below) can deliver immediately.
+            if (url != null && url.contains("checktoken")) {
+                ZennKuyBridge.sTokenDelivered = false;
+                AppLogger.log("WVM", "LoadURLPost: checktoken — reset sTokenDelivered");
+            }
+
+            // /google/native/callback: the growtopia engine fires this after OnSignIn() to exchange
+            // an OAuth code for an ltoken. When ZennKuy has already ingested the ltoken via
+            // nativeBypassLogin (sTokenDelivered=true), this call is redundant and will hit
+            // Ubisoft's 30-second rate limiter. Drop it — ZennKuy handles the game connection.
+            // (Mirrors Real Growlauncher's isLtokenSpoofActive() gate in LoadURLPost.)
+            if (url != null && url.contains("/google/native/callback") && ZennKuyBridge.sTokenDelivered) {
+                AppLogger.log("WVM", "LoadURLPost: suppressing native/callback — ZennKuy bypass active");
+                return;
+            }
+
+            // Ltoken shortcut: only on checktoken (the entry point). Deliver via nativeBypassLogin
+            // so ZennKuy handles the session without a /google/native/callback round-trip.
+            if (url != null && url.contains("checktoken")) {
+                LoginSpoof spoof = getActiveSpoof();
+                if (spoof != null) {
+                    String ltoken = spoof.getLtoken();
+                    if (ltoken != null && !ltoken.isEmpty()) {
+                        AppLogger.log("WVM", "LoadURLPost: ltoken shortcut — delivering via nativeBypassLogin");
+                        ZennKuyBridge.sTokenDelivered = true;
+                        ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
+                        try {
+                            Main.ZennKuyRenderer.nativeBypassLogin(ltoken);
+                            AppLogger.log("WVM", "LoadURLPost: ltoken shortcut nativeBypassLogin OK");
+                            // Wake engine connection loop immediately after token delivery.
+                            if (SharedActivity.mGLView != null) {
+                                SharedActivity.mGLView.queueEvent(() -> {
+                                    try {
+                                        Main.ZennKuyRenderer.nativeForcedOnlineMode(true);
+                                        AppLogger.log("WVM", "ltoken shortcut nativeForcedOnlineMode(true) fired");
+                                    } catch (Throwable ex) {
+                                        AppLogger.warn("WVM", "ltoken shortcut nativeForcedOnlineMode threw: " + ex.getMessage());
+                                    }
+                                });
+                            }
+                        } catch (Throwable t) {
+                            AppLogger.error("WVM", "LoadURLPost: ltoken nativeBypassLogin threw: " + t.getMessage());
+                        }
+                        return;
+                    }
                 }
             }
             ShowWebView();
             this.webView.postUrl(url, postData);
+        }));
+    }
+
+    /** Replays the engine's last login POST in the WebView, then auto-redirects the
+     *  Ubisoft dashboard token to /google/redirect so Chrome handles the account pick. */
+    public void postOAuthDashboard(final String url, final byte[] postData) {
+        sZennKuyRedirectActive = true; // arm the dashboard→Chrome intercept for this POST only
+        this.webViewWorkExecutor.execute(() -> this.baseActivity.runOnUiThread(() -> {
+            AppLogger.log("WVM", "postOAuthDashboard: " + url
+                    + " bytes=" + (postData == null ? 0 : postData.length));
+            Toast.makeText(this.baseActivity, "Connecting to Growtopia login…",
+                    Toast.LENGTH_SHORT).show();
+            this.allowExternalLinks = true;
+            originalURL = url;
+            ShowWebView();
+            if (postData != null && postData.length > 0) {
+                this.webView.postUrl(url, postData);
+            } else {
+                this.webView.loadUrl(url);
+            }
         }));
     }
 
@@ -199,12 +346,19 @@ public class WebViewManager {
 
         @JavascriptInterface
         public void openInBrowser(final String url) {
+            AppLogger.log("WVM", "openInBrowser called: " + url);
             WebViewManager.this.baseActivity.runOnUiThread(() -> {
-                if (url == null) return;
+                if (url == null || url.isEmpty()) {
+                    AppLogger.warn("WVM", "openInBrowser: URL null/empty, ignoring");
+                    return;
+                }
+                AppLogger.log("WVM", "openInBrowser → Chrome: " + url);
                 Toast.makeText(WebViewManager.this.baseActivity,
-                        "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                WebViewManager.this.baseActivity.startActivityForResult(
-                        new Intent(Intent.ACTION_VIEW, Uri.parse(url)), 1);
+                        "Launching Chrome for Google login…", Toast.LENGTH_SHORT).show();
+                WebViewManager.this.HideWebView();
+                Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                WebViewManager.this.baseActivity.startActivity(i);
             });
         }
     }
@@ -218,40 +372,94 @@ public class WebViewManager {
 
         @Override
         public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-            return shouldOverrideUrlLoading(v, req.getUrl() == null ? "" : req.getUrl().toString());
+            String url = req.getUrl() == null ? "" : req.getUrl().toString();
+            AppLogger.log("WVM", "override(req): " + url);
+            return shouldOverrideUrlLoading(v, url);
         }
 
         @Override @SuppressWarnings("deprecation")
         public boolean shouldOverrideUrlLoading(WebView v, String url) {
+            AppLogger.log("WVM", "override: " + url);
             try {
                 Uri next = Uri.parse(url == null ? "" : url);
-                String nh = next.getHost();
-                if (nh != null && nh.contains("accounts.google.com")) {
-                    Toast.makeText(this.baseActivity, "Logging in with google... wait a moment...", Toast.LENGTH_LONG).show();
-                    this.baseActivity.startActivityForResult(new Intent(Intent.ACTION_VIEW, next), 1);
+                String scheme = next.getScheme();
+
+                // grow:// — Ubisoft's post-OAuth redirect carrying the login token.
+                if ("grow".equalsIgnoreCase(scheme)) {
+                    AppLogger.log("WVM", "override: grow:// token redirect");
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_VIEW, next);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        this.baseActivity.startActivity(intent);
+                    } catch (Exception ex) {
+                        AppLogger.error("WVM", "grow:// route failed: " + ex.getMessage());
+                    }
+                    WebViewManager.this.HideWebView();
                     return true;
                 }
+
+                String nh = next.getHost();
+
+                // Ubisoft dashboard redirect — only intercept when ZennKuy overlay triggered it.
+                // Normal engine logins (Play Online) let the WebView load the dashboard normally
+                // so the user sees the "Select an account" dialog as the engine intends.
+                if (nh != null && nh.contains("login.growtopiagame.com")
+                        && url.contains("/player/login/dashboard")
+                        && WebViewManager.sZennKuyRedirectActive) {
+                    WebViewManager.sZennKuyRedirectActive = false; // consume the flag
+                    String googleUrl = url.replace("/player/login/dashboard", "/google/redirect");
+                    AppLogger.log("WVM", "dashboard→google/redirect → Chrome: " + googleUrl);
+                    Toast.makeText(this.baseActivity,
+                            "Opening Google login in Chrome…", Toast.LENGTH_SHORT).show();
+                    WebViewManager.this.HideWebView();
+                    Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(googleUrl));
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    this.baseActivity.startActivity(i);
+                    return true;
+                }
+
+                // Fallback: any Google OAuth page that somehow slipped through above.
+                if (nh != null && (nh.contains("accounts.google.com")
+                        || (nh.contains("google.com") && (url.contains("/o/oauth2") || url.contains("/ServiceLogin"))))) {
+                    AppLogger.log("WVM", "override: Google OAuth URL → Chrome: " + url);
+                    Toast.makeText(this.baseActivity,
+                            "Launching Chrome for Google login…", Toast.LENGTH_SHORT).show();
+                    WebViewManager.this.HideWebView();
+                    Intent i = new Intent(Intent.ACTION_VIEW, next);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    this.baseActivity.startActivity(i);
+                    return true;
+                }
+
                 Uri orig = Uri.parse(WebViewManager.originalURL == null ? "" : WebViewManager.originalURL);
                 String oh = orig.getHost();
                 if (!WebViewManager.this.allowExternalLinks || oh == null || nh == null || oh.equals(nh)) {
-                    v.loadUrl(url);
-                    return true;
+                    return false; // let WebView handle same-origin navigation normally
                 }
                 this.baseActivity.startActivity(new Intent(Intent.ACTION_VIEW, next));
                 return true;
             } catch (Exception e) {
+                AppLogger.error("WVM", "override error: " + e.getMessage());
                 return false;
             }
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            AppLogger.log("WVM", "onPageStarted: " + url);
+        }
+
+        @Override
         public void onPageFinished(WebView view, String url) {
+            AppLogger.log("WVM", "onPageFinished: " + url);
             this.listener.OnPageLoaded(url);
         }
 
         @Override
         public void onReceivedError(WebView v, WebResourceRequest req, WebResourceError err) {
             super.onReceivedError(v, req, err);
+            AppLogger.error("WVM", "onReceivedError code=" + err.getErrorCode()
+                    + " url=" + (req.getUrl() == null ? "?" : req.getUrl().toString()));
             this.listener.OnError(err.getErrorCode());
         }
     }

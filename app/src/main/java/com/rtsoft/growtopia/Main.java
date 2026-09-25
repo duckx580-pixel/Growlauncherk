@@ -11,6 +11,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.Toast;
 
 import com.ubisoft.bridge.JavaInterface;
 
@@ -115,6 +116,75 @@ public class Main extends SharedActivity {
     }
 
     @Override
+    public void onBackPressed() {
+        if (webViewManager != null && webViewManager.IsVisible()) {
+            AppLogger.log("Main", "Back pressed — dismissing WebView");
+            webViewManager.HideWebView();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleGrowIntent(intent);
+    }
+
+    /**
+     * Handles grow:// deep links that Chrome fires after Ubisoft's Google OAuth callback.
+     * Ubisoft redirects to grow://?token=<LTOKEN> (or grow://?info=<LTOKEN>).
+     * We extract the token and pass it to the engine via nativeOnScriptCall so login completes.
+     */
+    private void handleGrowIntent(android.content.Intent intent) {
+        if (intent == null) return;
+        android.net.Uri data = intent.getData();
+        if (data == null || !"grow".equalsIgnoreCase(data.getScheme())) return;
+
+        String token = data.getQueryParameter("token");
+        if (token == null || token.isEmpty()) token = data.getQueryParameter("info");
+        if (token == null || token.isEmpty()) {
+            AppLogger.warn("GrowDeepLink", "grow:// intent had no token/info param: " + data);
+            return;
+        }
+
+        final String finalToken = token;
+        AppLogger.log("GrowDeepLink", "Received token via grow:// (len=" + finalToken.length() + ")");
+        ZennKuyBridge.sTokenDelivered = true;
+        ZennKuyBridge.sTokenDeliveredAt = System.currentTimeMillis();
+        webViewManager.HideWebView();
+        runOnUiThread(() -> Toast.makeText(this,
+                "Token received — verifying login…", Toast.LENGTH_SHORT).show());
+        if (zennKuyOverlay != null) zennKuyOverlay.showVerifyingBanner();
+
+        // Deliver via ZennKuy's nativeBypassLogin — ZennKuy ingests the ltoken and completes the
+        // game session handshake internally, without triggering the growtopia engine's own
+        // /google/native/callback HTTP verification round-trip that Ubisoft rate-limits.
+        AppLogger.log("GrowDeepLink", "Delivering token via nativeBypassLogin (len=" + finalToken.length() + ")");
+        try {
+            ZennKuyRenderer.nativeBypassLogin(finalToken);
+            AppLogger.log("GrowDeepLink", "nativeBypassLogin OK");
+            // Wake the engine's connection loop on the GL thread so it dispatches the login
+            // packet immediately instead of waiting for the 30-second checktoken timeout.
+            if (SharedActivity.mGLView != null) {
+                SharedActivity.mGLView.queueEvent(() -> {
+                    try {
+                        ZennKuyRenderer.nativeForcedOnlineMode(true);
+                        AppLogger.log("GrowDeepLink", "nativeForcedOnlineMode(true) fired on GL thread");
+                    } catch (Throwable ex) {
+                        AppLogger.warn("GrowDeepLink", "nativeForcedOnlineMode threw: " + ex.getMessage());
+                    }
+                });
+            } else {
+                AppLogger.warn("GrowDeepLink", "mGLView null — nativeForcedOnlineMode skipped");
+            }
+        } catch (Throwable t) {
+            AppLogger.error("GrowDeepLink", "nativeBypassLogin threw: " + t.getMessage());
+        }
+    }
+
+    @Override
     public void onConfigurationChanged(Configuration config) {
         int h = config.screenHeightDp, w = config.screenWidthDp;
         if (h > w) { config.screenHeightDp = w; config.screenWidthDp = h; }
@@ -143,7 +213,9 @@ public class Main extends SharedActivity {
             configuration.screenWidthDp = oldHeight;
             getResources().updateConfiguration(configuration, getResources().getDisplayMetrics());
         }
+        AppLogger.initFileLog(this);
         JavaInterface.injectActivityJava(this);
+        handleGrowIntent(getIntent());
         this.heightProvider = new HeightProvider(this).setHeightListener(this::OnKeyboardHeightChanged);
         this.firebaseCrashlyticsManager = new FirebaseCrashlyticsManager(this);
         this.ironSourceManager.OnCreate();

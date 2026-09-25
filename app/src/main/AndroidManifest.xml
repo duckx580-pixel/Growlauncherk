@@ -76,6 +76,13 @@
             android:screenOrientation="sensorLandscape"
             android:windowSoftInputMode="adjustNothing"
             android:theme="@style/Theme.Growlauncher.Game">
+            <!-- Catches the grow:// redirect that Chrome fires after Ubisoft's Google OAuth callback -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="grow" />
+            </intent-filter>
         </activity>
 
         <activity android:name="com.rtsoft.growtopia.HelpshiftActivity" android:exported="true" android:excludeFromRecents="true" android:screenOrientation="sensorLandscape" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density" android:windowSoftInputMode="adjustNothing" />

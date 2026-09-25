@@ -6,6 +6,7 @@ import android.opengl.GLSurfaceView;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import com.rtsoft.growtopia.AppLogger;
 
 /** Google sign-in compatibility bridge for Growtopia 5.57. */
 public class GoogleSignInHelper {
@@ -32,6 +33,17 @@ public class GoogleSignInHelper {
             return;
         }
         mainActivity.runOnUiThread(() -> {
+            if (ZennKuyBridge.sTokenDelivered) {
+                long ageMs = System.currentTimeMillis() - ZennKuyBridge.sTokenDeliveredAt;
+                if (ageMs < 30_000) {
+                    AppLogger.log(TAG, "SignIn: suppressed — token delivered " + ageMs + "ms ago");
+                    return;
+                }
+                // Token was delivered >30s ago and login still hasn't completed.
+                // Allow a retry so Cancel / manual re-attempt can unblock the user.
+                AppLogger.log(TAG, "SignIn: delivery timeout (" + ageMs + "ms) — allowing retry");
+                ZennKuyBridge.sTokenDelivered = false;
+            }
             spoof.setGoogleLogs("Opening Growtopia Google login");
             ZennKuyBridge.startResolving();
         });
@@ -63,9 +75,14 @@ public class GoogleSignInHelper {
         }
         glView.queueEvent(() -> {
             try {
+                AppLogger.log(TAG, "OnSignIn GL call: code=" + code
+                        + " tokenLen=" + (token == null ? 0 : token.length()));
                 OnSignIn(code, token);
+                AppLogger.log(TAG, "OnSignIn returned OK");
             } catch (UnsatisfiedLinkError error) {
-                Log.w(TAG, "OnSignIn native unavailable: " + error.getMessage());
+                AppLogger.warn(TAG, "OnSignIn native unavailable: " + error.getMessage());
+            } catch (Throwable t) {
+                AppLogger.error(TAG, "OnSignIn threw: " + t.getMessage());
             }
         });
     }

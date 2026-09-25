@@ -1,5 +1,9 @@
 package com.rtsoft.growtopia;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ObjectAnimator;
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -20,6 +24,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.ScrollView;
@@ -84,7 +89,7 @@ public class ZennKuyOverlay {
     }
 
     private void showMenu() {
-        LoginSpoof spoof = new LoginSpoof(ctx);
+        DeviceSpoofer ds = new DeviceSpoofer(ctx);
 
         LinearLayout card = new LinearLayout(ctx);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -123,9 +128,13 @@ public class ZennKuyOverlay {
 
         root.addView(sectionLabel("MAC ADDRESS"));
         LinearLayout macRow = row();
-        EditText macEdit = field(spoof.getMac());
+        EditText macEdit = field(ds.getMac());
         Button macRand = smallBtn("RANDOM");
-        macRand.setOnClickListener(v -> macEdit.setText(spoof.generateMac()));
+        macRand.setOnClickListener(v -> {
+            String m = DeviceSpoofer.generateMac();
+            ds.setMac(m);
+            macEdit.setText(m);
+        });
         macRow.addView(macEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         macRow.addView(macRand);
@@ -134,34 +143,52 @@ public class ZennKuyOverlay {
 
         root.addView(sectionLabel("RID"));
         LinearLayout ridRow = row();
-        EditText ridEdit = field(spoof.getRid());
+        EditText ridEdit = field(ds.getRid());
         Button ridRand = smallBtn("RANDOM");
-        ridRand.setOnClickListener(v -> ridEdit.setText(spoof.generateRid()));
+        ridRand.setOnClickListener(v -> {
+            String r = DeviceSpoofer.generateRid();
+            ds.setRid(r);
+            ridEdit.setText(r);
+        });
         ridRow.addView(ridEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ridRow.addView(ridRand);
         root.addView(ridRow);
         root.addView(spacer(10));
 
-        root.addView(sectionLabel("WK"));
+        root.addView(sectionLabel("GID (WK)"));
         LinearLayout wkRow = row();
-        EditText wkEdit = field(spoof.getWk());
+        EditText wkEdit = field(ds.getGid());
         Button wkRand = smallBtn("RANDOM");
-        wkRand.setOnClickListener(v -> wkEdit.setText(spoof.generateWk()));
+        wkRand.setOnClickListener(v -> {
+            String g = DeviceSpoofer.generateGid();
+            ds.setGid(g);
+            wkEdit.setText(g);
+        });
         wkRow.addView(wkEdit, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         wkRow.addView(wkRand);
         root.addView(wkRow);
         root.addView(spacer(14));
 
-        TextView hint = label("Tap Start Resolving → Chrome opens Growtopia login\n→ sign in with Google → game logs in automatically.");
-        hint.setTextColor(C_ACCENT);
+        root.addView(sectionLabel("LOGIN URL TARGET"));
+        String cachedUrl = WebViewManager.sLastLoginUrl;
+        TextView urlTarget = label(cachedUrl != null && !cachedUrl.isEmpty()
+                ? cachedUrl : "(tap Play Online in-game first)");
+        urlTarget.setTextColor(cachedUrl != null && !cachedUrl.isEmpty() ? C_ACCENT : C_MUTED);
+        urlTarget.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        urlTarget.setTypeface(android.graphics.Typeface.MONOSPACE);
+        root.addView(urlTarget);
+        root.addView(spacer(14));
+
+        TextView hint = label("Tap Play Online in the game → tap LOGIN TOKEN → pick\nyour Google account in Chrome → game logs in.");
+        hint.setTextColor(C_MUTED);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         root.addView(hint);
         root.addView(spacer(14));
 
         Button resolveBtn = new Button(ctx);
-        resolveBtn.setText("START RESOLVING");
+        resolveBtn.setText("LOGIN TOKEN");
         resolveBtn.setTextColor(Color.WHITE);
         resolveBtn.setTypeface(null, Typeface.BOLD);
         resolveBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
@@ -180,6 +207,10 @@ public class ZennKuyOverlay {
         clearBtn.setTextColor(Color.parseColor("#E74C3C"));
         GradientDrawable clearBg = roundedRect(Color.TRANSPARENT, Color.parseColor("#E74C3C"), 1, 8);
         clearBtn.setBackground(rippled(clearBg, Color.parseColor("#E74C3C")));
+        clearBtn.setOnClickListener(v -> {
+            AppLogger.clear();
+            android.widget.Toast.makeText(ctx, "Logs cleared", android.widget.Toast.LENGTH_SHORT).show();
+        });
         logRow.addView(logsBtn);
         logRow.addView(clearBtn);
         root.addView(logRow);
@@ -210,10 +241,10 @@ public class ZennKuyOverlay {
         resolveBtn.setOnClickListener(v -> {
             String mac = macEdit.getText().toString().trim();
             String rid = ridEdit.getText().toString().trim();
-            String wk  = wkEdit.getText().toString().trim();
-            if (!mac.isEmpty()) spoof.setMac(mac);
-            if (!rid.isEmpty()) spoof.setRid(rid);
-            if (!wk.isEmpty())  spoof.setWk(wk);
+            String gid = wkEdit.getText().toString().trim();
+            if (!mac.isEmpty()) ds.setMac(mac);
+            if (!rid.isEmpty()) ds.setRid(rid);
+            if (!gid.isEmpty()) ds.setGid(gid);
 
             dialog.dismiss();
             startResolving();
@@ -251,23 +282,54 @@ public class ZennKuyOverlay {
         b.show();
     }
 
-    /**
-     * Initiates Google login via the WebView → Chrome → grow:// redirect flow.
-     *
-     * <p>Delegates entirely to {@link ZennKuyBridge#startResolving()} which handles:
-     * <ol>
-     *   <li>Short-circuit if token already delivered this session ({@code sTokenDelivered})</li>
-     *   <li>Inject saved ltoken / refresh-token spoof if enabled</li>
-     *   <li>Skip if WebView OAuth flow is already running</li>
-     *   <li>Fallback: load Growtopia dashboard URL in WebView</li>
-     * </ol>
-     *
-     * <p><b>Do NOT call {@code googleSignInHelper.SignIn()} here.</b> That launches
-     * the native Google SDK account picker which fails with Error 10 (DEVELOPER_ERROR)
-     * on debug-signed APKs because the debug keystore SHA-1 is not registered in
-     * Firebase — and V3 cannot register it without breaking the stock build.
-     */
+    /** Shows a floating green pill "✓ Verifying login…" that fades out after ~3 s. */
+    public void showVerifyingBanner() {
+        if (!(ctx instanceof Activity)) return;
+        Activity act = (Activity) ctx;
+        act.runOnUiThread(() -> {
+            TextView pill = new TextView(ctx);
+            pill.setText("✓ Verifying login…");
+            pill.setTextColor(Color.WHITE);
+            pill.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            pill.setTypeface(null, Typeface.BOLD);
+            pill.setPadding(dp(16), dp(8), dp(16), dp(8));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(Color.argb(230, 30, 158, 82));
+            bg.setCornerRadius(dp(20));
+            pill.setBackground(bg);
+            pill.setAlpha(0f);
+
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.START);
+            lp.topMargin  = dp(72);
+            lp.leftMargin = dp(12);
+
+            ViewGroup root = act.getWindow().getDecorView().findViewById(android.R.id.content);
+            root.addView(pill, lp);
+
+            ObjectAnimator fadeIn = ObjectAnimator.ofFloat(pill, "alpha", 0f, 1f);
+            fadeIn.setDuration(250);
+            fadeIn.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator a) {
+                    pill.postDelayed(() -> {
+                        ObjectAnimator fadeOut = ObjectAnimator.ofFloat(pill, "alpha", 1f, 0f);
+                        fadeOut.setDuration(500);
+                        fadeOut.addListener(new AnimatorListenerAdapter() {
+                            @Override public void onAnimationEnd(Animator a2) {
+                                root.removeView(pill);
+                            }
+                        });
+                        fadeOut.start();
+                    }, 2500);
+                }
+            });
+            fadeIn.start();
+        });
+    }
+
     private void startResolving() {
+        ZennKuyBridge.sTokenDelivered = false;  // user explicitly starting a new login
         ZennKuyBridge.startResolving();
     }
 

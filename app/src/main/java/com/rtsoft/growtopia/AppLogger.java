@@ -1,7 +1,12 @@
 package com.rtsoft.growtopia;
 
+import android.content.Context;
 import android.util.Log;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.Date;
@@ -9,13 +14,7 @@ import java.util.Locale;
 
 /**
  * Lightweight in-app circular log buffer for debugging on devices without adb/logcat.
- *
- * <p>All write paths (WebViewManager, ZennKuyBridge, GoogleSignInHelper) call
- * {@link #log(String, String)} which simultaneously forwards to Android's logcat
- * AND appends to the in-memory ring so the user can view the full Google login
- * trace from inside the ZK menu (VIEW LOGS button) without needing a computer.
- *
- * <p>Thread-safe via {@code synchronized}. Max 300 entries — oldest evicted first.
+ * Also writes to a persistent file so logs survive app restarts.
  */
 public final class AppLogger {
 
@@ -24,42 +23,90 @@ public final class AppLogger {
     private static final SimpleDateFormat FMT =
             new SimpleDateFormat("HH:mm:ss.SSS", Locale.US);
 
+    private static volatile File logFile = null;
+
     private AppLogger() {}
 
-    /** Log at DEBUG level — goes to logcat AND the in-app buffer. */
+    /**
+     * Call once from Main.onCreate so file logging is ready before any other call.
+     * Safe to call multiple times.
+     */
+    public static void initFileLog(Context context) {
+        if (logFile != null) return;
+        try {
+            Context app = context.getApplicationContext();
+            File logDir = app.getExternalFilesDir(null);
+            if (logDir == null) logDir = app.getFilesDir();
+            File f = new File(logDir, "debug_login.log");
+            // Rotate: keep at most 512 KB
+            if (f.exists() && f.length() > 512 * 1024) {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+            logFile = f;
+            log("AppLogger", "File log initialized: " + f.getAbsolutePath());
+        } catch (Exception e) {
+            Log.e("AppLogger", "initFileLog failed: " + e.getMessage());
+        }
+    }
+
+    /** Log at DEBUG level — goes to logcat, in-app buffer, and persistent file. */
     public static void log(String tag, String message) {
         Log.d(tag, message);
         append("[D] " + tag + ": " + message);
     }
 
-    /** Log at WARN level — goes to logcat AND the in-app buffer. */
+    /** Log at WARN level. */
     public static void warn(String tag, String message) {
         Log.w(tag, message);
         append("[W] " + tag + ": " + message);
     }
 
-    /** Log at ERROR level — goes to logcat AND the in-app buffer. */
+    /** Log at ERROR level. */
     public static void error(String tag, String message) {
         Log.e(tag, message);
         append("[E] " + tag + ": " + message);
     }
 
-    /** Returns all buffered lines as a single string, newest at the bottom. */
+    /**
+     * Returns all buffered lines as a single string (newest at bottom),
+     * prefixed with the persistent file path so the user knows where to find it.
+     */
     public static synchronized String getLogs() {
-        if (buffer.isEmpty()) return "(no logs captured yet — trigger Google login first)";
         StringBuilder sb = new StringBuilder();
-        for (String line : buffer) sb.append(line).append('\n');
+        if (logFile != null) {
+            sb.append("// File: ").append(logFile.getAbsolutePath()).append("\n\n");
+        }
+        if (buffer.isEmpty()) {
+            sb.append("(no logs captured yet — trigger Google login first)");
+        } else {
+            for (String line : buffer) sb.append(line).append('\n');
+        }
         return sb.toString();
     }
 
-    /** Clears the buffer. */
+    /** Clears both the in-memory buffer and the persistent log file. */
     public static synchronized void clear() {
         buffer.clear();
+        if (logFile != null && logFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            logFile.delete();
+        }
     }
 
     private static synchronized void append(String message) {
         String line = FMT.format(new Date()) + " " + message;
         buffer.addLast(line);
         if (buffer.size() > MAX_ENTRIES) buffer.removeFirst();
+        writeToFile(line);
+    }
+
+    private static void writeToFile(String line) {
+        File f = logFile;
+        if (f == null) return;
+        try (BufferedWriter w = new BufferedWriter(new FileWriter(f, true))) {
+            w.write(line);
+            w.newLine();
+        } catch (IOException ignored) {}
     }
 }
